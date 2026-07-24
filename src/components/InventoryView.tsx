@@ -62,21 +62,21 @@ export default function InventoryView({ data }: { data: DashboardData }) {
   const selectedProdColor = data.products.find(p => p.id === selectedProdId)?.color || '#22d3ee';
 
   return (
-    <div className="space-y-6 flex flex-col h-full">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center justify-between bg-slate-900/50 p-4 rounded-xl border border-slate-800/80">
+    <div className="space-y-6 flex flex-col flex-1 min-h-0">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center justify-between bg-card/50 p-4 rounded-lg border border-border/80">
         <div className="flex items-center gap-4">
-          <h3 className="text-lg font-semibold text-slate-100 flex items-center gap-2">
+          <h3 className="text-lg font-semibold text-foreground flex items-center gap-2">
             <TrendingUp className="w-5 h-5 text-indigo-400" />
             Inventory Forecast (30 Days)
           </h3>
         </div>
         <div className="flex flex-wrap items-center gap-4">
           <div className="flex items-center gap-2 text-sm">
-            <Filter className="w-4 h-4 text-slate-500" />
+            <Filter className="w-4 h-4 text-muted-foreground/80" />
             <select 
               value={selectedLocId} 
               onChange={(e) => setSelectedLocId(e.target.value)}
-              className="bg-slate-950 text-slate-200 border border-slate-800 rounded-lg px-3 py-1.5 text-xs font-medium focus:outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/50"
+              className="bg-background text-foreground/90 border border-border rounded-lg px-3 py-1.5 text-xs font-medium focus:outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/50"
             >
               {data.locations.filter(l => ['REFINERY', 'COASTAL_TERMINAL', 'CRUDE_STORAGE', 'LNG_TERMINAL'].includes(l.type)).map(loc => (
                 <option key={loc.id} value={loc.id}>{loc.name}</option>
@@ -87,7 +87,7 @@ export default function InventoryView({ data }: { data: DashboardData }) {
             <select 
               value={selectedProdId} 
               onChange={(e) => setSelectedProdId(e.target.value)}
-              className="bg-slate-950 text-slate-200 border border-slate-800 rounded-lg px-3 py-1.5 text-xs font-medium focus:outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/50"
+              className="bg-background text-foreground/90 border border-border rounded-lg px-3 py-1.5 text-xs font-medium focus:outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/50"
             >
               {data.products.map(prod => (
                 <option key={prod.id} value={prod.id}>{prod.name}</option>
@@ -99,10 +99,10 @@ export default function InventoryView({ data }: { data: DashboardData }) {
 
       <div className="flex-1 min-h-[400px]">
         {chartData.length > 0 ? (
-          <Card className="bg-slate-900/50 border-slate-800/80 rounded-xl h-full flex flex-col">
-            <CardHeader className="border-b border-slate-800/60 pb-4 bg-slate-950/50 rounded-t-xl">
-              <CardTitle className="text-sm font-semibold text-slate-400">
-                Projected Stock Profile: <span className="text-slate-100">{selectedLocName}</span>
+          <Card className="bg-card/50 border-border/80 rounded-lg h-full flex flex-col">
+            <CardHeader className="border-b border-border/60 pb-4 bg-background/50 rounded-t-xl">
+              <CardTitle className="text-sm font-semibold text-muted-foreground">
+                Projected Stock Profile: <span className="text-foreground">{selectedLocName}</span>
               </CardTitle>
             </CardHeader>
             <CardContent className="flex-1 p-6">
@@ -146,8 +146,8 @@ export default function InventoryView({ data }: { data: DashboardData }) {
             </CardContent>
           </Card>
         ) : (
-          <div className="h-full flex items-center justify-center bg-slate-900/50 rounded-xl border border-slate-800/80">
-            <span className="text-sm font-medium text-slate-500">No tank configuration exists for this Location and Product combination.</span>
+          <div className="h-full flex items-center justify-center bg-card/50 rounded-lg border border-border/80">
+            <span className="text-sm font-medium text-muted-foreground/80">No tank configuration exists for this Location and Product combination.</span>
           </div>
         )}
       </div>

@@ -36,21 +36,21 @@ export default function TankFarmView({ data }: { data: DashboardData }) {
   ];
 
   return (
-    <div className="space-y-6 flex flex-col h-full">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center justify-between bg-slate-900/50 p-4 rounded-xl border border-slate-800/80 shadow-sm">
+    <div className="space-y-6 flex flex-col flex-1 min-h-0">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center justify-between bg-card/50 p-4 rounded-lg border border-border/80 shadow-sm">
         <div className="flex items-center gap-4">
-          <h3 className="text-sm font-semibold text-slate-100 flex items-center gap-2">
+          <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
             <Factory className="w-5 h-5 text-indigo-400" />
             Tank Farm Management
           </h3>
         </div>
         <div className="flex flex-wrap items-center gap-4">
           <div className="flex items-center gap-2 text-sm">
-            <Filter className="w-4 h-4 text-slate-500" />
+            <Filter className="w-4 h-4 text-muted-foreground/80" />
             <select 
               value={selectedLocId} 
               onChange={(e) => setSelectedLocId(e.target.value)}
-              className="bg-slate-950 text-slate-300 border border-slate-700 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/50 transition-all"
+              className="bg-background text-foreground/80 border border-border/80 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/50 transition-all"
             >
               <option value="ALL">All Locations</option>
               {data.locations.filter(l => ['REFINERY', 'COASTAL_TERMINAL', 'CRUDE_STORAGE', 'LNG_TERMINAL'].includes(l.type)).map(loc => (
@@ -62,7 +62,7 @@ export default function TankFarmView({ data }: { data: DashboardData }) {
             <select 
               value={selectedProdId} 
               onChange={(e) => setSelectedProdId(e.target.value)}
-              className="bg-slate-950 text-slate-300 border border-slate-700 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/50 transition-all"
+              className="bg-background text-foreground/80 border border-border/80 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/50 transition-all"
             >
               <option value="ALL">All Products</option>
               {data.products.map(prod => (
@@ -70,7 +70,7 @@ export default function TankFarmView({ data }: { data: DashboardData }) {
               ))}
             </select>
           </div>
-          <button className="px-4 py-1.5 bg-slate-800 text-slate-200 border border-slate-700 rounded-lg text-xs font-medium hover:bg-slate-700 transition-colors ml-4 shadow-sm">
+          <button className="px-4 py-1.5 bg-muted text-foreground/90 border border-border/80 rounded-lg text-xs font-medium hover:bg-accent transition-colors ml-4 shadow-sm">
             Inter-tank Transfer
           </button>
         </div>
@@ -78,18 +78,18 @@ export default function TankFarmView({ data }: { data: DashboardData }) {
 
       <div className="flex-1 overflow-y-auto pb-10 space-y-8 pr-2">
         {Object.entries(tanksByLoc).length === 0 ? (
-          <div className="h-40 flex items-center justify-center bg-slate-900/50 rounded-xl border border-slate-800/80">
-            <span className="text-sm font-medium text-slate-500">No tanks match the selected filters</span>
+          <div className="h-40 flex items-center justify-center bg-card/50 rounded-lg border border-border/80">
+            <span className="text-sm font-medium text-muted-foreground/80">No tanks match the selected filters</span>
           </div>
         ) : (
           (Object.entries(tanksByLoc) as [string, Tank[]][]).map(([locId, tanks]) => {
             const loc = getLocData(locId);
             return (
               <div key={locId} className="space-y-4">
-                <div className="flex items-center gap-3 pb-2 border-b border-slate-800/60">
-                  <h4 className="text-sm font-semibold text-slate-200">{loc?.name}</h4>
-                  <span className="text-[10px] px-2 py-0.5 rounded border border-slate-700 bg-slate-800 font-medium text-slate-400 uppercase">{loc?.type.replace('_', ' ')}</span>
-                  <span className="text-[11px] font-medium text-slate-500 ml-auto">{tanks.length} TANKS</span>
+                <div className="flex items-center gap-3 pb-2 border-b border-border/60">
+                  <h4 className="text-sm font-semibold text-foreground/90">{loc?.name}</h4>
+                  <span className="text-[10px] px-2 py-0.5 rounded border border-border/80 bg-muted font-medium text-muted-foreground uppercase">{loc?.type?.replace('_', ' ')}</span>
+                  <span className="text-[11px] font-medium text-muted-foreground/80 ml-auto">{tanks.length} TANKS</span>
                 </div>
                 
                 <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
@@ -104,14 +104,14 @@ export default function TankFarmView({ data }: { data: DashboardData }) {
                     const isTankTopRisk = ullageAtEta < 0;
 
                     return (
-                      <div key={tank.id} className="flex flex-col p-4 rounded-xl border border-slate-800/80 bg-slate-900/40 relative group hover:border-slate-700 transition-colors">
+                      <div key={tank.id} className="flex flex-col p-4 rounded-lg border border-border/80 bg-card/40 relative group hover:border-border/80 transition-colors">
                         {/* Top Header */}
                         <div className="flex justify-between items-start mb-4">
                           <div className="flex flex-col gap-1.5">
                             <span className="font-mono text-sm flex items-center gap-2">
-                              <span className="text-slate-100 font-semibold">{tank.name}</span>
+                              <span className="text-foreground font-semibold">{tank.name}</span>
                             </span>
-                            <span className="text-xs font-medium text-slate-500 flex items-center gap-1.5">
+                            <span className="text-xs font-medium text-muted-foreground/80 flex items-center gap-1.5">
                               <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: product?.color }}></span>
                               {product?.name}
                             </span>
@@ -127,26 +127,26 @@ export default function TankFarmView({ data }: { data: DashboardData }) {
                         
                         {/* Detailed Metrics Table */}
                         <div className="grid grid-cols-2 gap-y-2 mb-4 text-xs font-mono">
-                           <div className="text-slate-500">Current stock</div>
-                           <div className="text-right text-slate-200 font-semibold">{tank.currentStock.toLocaleString()} MT</div>
+                           <div className="text-muted-foreground/80">Current stock</div>
+                           <div className="text-right text-foreground/90 font-semibold">{tank.currentStock.toLocaleString()} MT</div>
                            
-                           <div className="text-slate-500">Safe capacity</div>
-                           <div className="text-right text-slate-400">{safeCapacity.toLocaleString()} MT</div>
+                           <div className="text-muted-foreground/80">Safe capacity</div>
+                           <div className="text-right text-muted-foreground">{safeCapacity.toLocaleString()} MT</div>
                            
-                           <div className="text-slate-500">Current ullage</div>
+                           <div className="text-muted-foreground/80">Current ullage</div>
                            <div className="text-right text-indigo-400">{currentUllage.toLocaleString()} MT</div>
                            
-                           <div className="text-slate-500">Incoming parcel</div>
+                           <div className="text-muted-foreground/80">Incoming parcel</div>
                            <div className="text-right text-teal-400">{incoming > 0 ? `${incoming.toLocaleString()} MT` : '-'}</div>
 
-                           <div className="text-slate-500 font-semibold mt-1">Ullage at ETA</div>
+                           <div className="text-muted-foreground/80 font-semibold mt-1">Ullage at ETA</div>
                            <div className={cn("text-right font-semibold mt-1", isTankTopRisk ? "text-rose-400" : "text-emerald-400")}>
                              {ullageAtEta.toLocaleString()} MT
                            </div>
                         </div>
 
                         {/* Interactive Bar */}
-                        <div className="relative h-3 bg-slate-950 rounded overflow-hidden border border-slate-800">
+                        <div className="relative h-3 bg-background rounded overflow-hidden border border-border">
                           <div 
                             className="absolute top-0 bottom-0 left-0 transition-all duration-1000"
                             style={{ 
@@ -181,27 +181,27 @@ export default function TankFarmView({ data }: { data: DashboardData }) {
 
         {/* Multimodal Board */}
         <div className="pt-6">
-           <div className="flex items-center gap-3 pb-3 border-b border-slate-800/60">
-             <h4 className="text-sm font-semibold text-slate-200">Multimodal Inbound & Outbound</h4>
+           <div className="flex items-center gap-3 pb-3 border-b border-border/60">
+             <h4 className="text-sm font-semibold text-foreground/90">Multimodal Inbound & Outbound</h4>
            </div>
-           <div className="mt-4 bg-slate-900/50 rounded-xl border border-slate-800/80 overflow-hidden">
+           <div className="mt-4 bg-card/50 rounded-lg border border-border/80 overflow-hidden">
              <table className="w-full text-left border-collapse">
                <thead>
-                 <tr className="border-b border-slate-800/50 bg-slate-950/50">
-                   <th className="p-3 pl-5 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Time</th>
-                   <th className="p-3 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Mode</th>
-                   <th className="p-3 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Direction</th>
-                   <th className="p-3 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Product</th>
-                   <th className="p-3 text-[11px] font-semibold text-slate-500 uppercase tracking-wider text-right">Quantity</th>
-                   <th className="p-3 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Source / Destination</th>
-                   <th className="p-3 pr-5 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Status</th>
+                 <tr className="border-b border-border/50 bg-background/50">
+                   <th className="p-3 pl-5 text-[11px] font-semibold text-muted-foreground/80 uppercase tracking-wider">Time</th>
+                   <th className="p-3 text-[11px] font-semibold text-muted-foreground/80 uppercase tracking-wider">Mode</th>
+                   <th className="p-3 text-[11px] font-semibold text-muted-foreground/80 uppercase tracking-wider">Direction</th>
+                   <th className="p-3 text-[11px] font-semibold text-muted-foreground/80 uppercase tracking-wider">Product</th>
+                   <th className="p-3 text-[11px] font-semibold text-muted-foreground/80 uppercase tracking-wider text-right">Quantity</th>
+                   <th className="p-3 text-[11px] font-semibold text-muted-foreground/80 uppercase tracking-wider">Source / Destination</th>
+                   <th className="p-3 pr-5 text-[11px] font-semibold text-muted-foreground/80 uppercase tracking-wider">Status</th>
                  </tr>
                </thead>
-               <tbody className="divide-y divide-slate-800/50">
+               <tbody className="divide-y divide-border/50">
                  {multimodalBoard.map((row, i) => (
-                   <tr key={i} className="hover:bg-slate-800/30 transition-colors">
-                     <td className="p-3 pl-5 text-sm font-mono text-slate-400">{row.time}</td>
-                     <td className="p-3 text-sm font-medium text-slate-300">
+                   <tr key={i} className="hover:bg-muted/30 transition-colors">
+                     <td className="p-3 pl-5 text-sm font-mono text-muted-foreground">{row.time}</td>
+                     <td className="p-3 text-sm font-medium text-foreground/80">
                         <span className="flex items-center gap-2">
                           {row.mode === 'Pipeline' && <Activity className="w-3.5 h-3.5 text-indigo-400" />}
                           {row.mode === 'Rake' && <Truck className="w-3.5 h-3.5 text-orange-400" />}
@@ -210,12 +210,12 @@ export default function TankFarmView({ data }: { data: DashboardData }) {
                           {row.mode}
                         </span>
                      </td>
-                     <td className="p-3 text-sm text-slate-400">{row.direction}</td>
-                     <td className="p-3 text-sm font-medium text-slate-200">{row.product}</td>
-                     <td className="p-3 text-sm font-mono text-slate-300 text-right">{row.qty}</td>
-                     <td className="p-3 text-sm text-slate-400">{row.source}</td>
+                     <td className="p-3 text-sm text-muted-foreground">{row.direction}</td>
+                     <td className="p-3 text-sm font-medium text-foreground/90">{row.product}</td>
+                     <td className="p-3 text-sm font-mono text-foreground/80 text-right">{row.qty}</td>
+                     <td className="p-3 text-sm text-muted-foreground">{row.source}</td>
                      <td className="p-3 pr-5">
-                       <span className={cn("flex items-center gap-1.5 text-xs font-medium", row.alert ? "text-rose-400" : "text-slate-400")}>
+                       <span className={cn("flex items-center gap-1.5 text-xs font-medium", row.alert ? "text-rose-400" : "text-muted-foreground")}>
                          {row.alert && <AlertOctagon className="w-3.5 h-3.5" />}
                          {row.status}
                        </span>

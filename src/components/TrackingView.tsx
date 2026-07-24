@@ -38,15 +38,18 @@ export default function TrackingView({ data }: { data: DashboardData }) {
   }, []);
 
   // Dummy mid-voyage vessel positions for demo
-  const liveVessels = [
-    { ...data.vessels[0], lat: 15.0, lng: 72.0, heading: 'Kochi' },
-    { ...data.vessels[1], lat: 18.0, lng: 85.0, heading: 'Paradip' },
-  ];
+  const liveVessels = [];
+  if (data.vessels.length > 0) {
+    liveVessels.push({ ...data.vessels[0], lat: 15.0, lng: 72.0, heading: 'Kochi' });
+  }
+  if (data.vessels.length > 1) {
+    liveVessels.push({ ...data.vessels[1], lat: 18.0, lng: 85.0, heading: 'Paradip' });
+  }
 
   return (
-    <div className="h-full flex flex-col space-y-4 relative">
+    <div className="flex-1 flex flex-col space-y-4 relative min-h-0">
       <div className="flex items-center justify-between">
-        <h3 className="text-lg font-semibold text-slate-100">Live AIS Tracking & Execution</h3>
+        <h3 className="text-lg font-semibold text-foreground">Live AIS Tracking & Execution</h3>
         <div className="flex gap-2">
           <span className="inline-flex items-center rounded-md bg-indigo-500/10 px-3 py-1 text-[11px] font-medium text-indigo-400 ring-1 ring-inset ring-indigo-500/30">
             AIS Live
@@ -58,14 +61,14 @@ export default function TrackingView({ data }: { data: DashboardData }) {
       </div>
 
       {weatherData && (
-        <div className="absolute top-20 right-8 z-[1000] bg-slate-950/80 p-4 rounded-xl shadow-lg border border-slate-800/80 w-64 backdrop-blur-md">
+        <div className="absolute top-20 right-8 z-[1000] bg-background/80 p-4 rounded-lg shadow-lg border border-border/80 w-64 backdrop-blur-md">
           <div className="flex items-center gap-2 mb-2">
             <CloudLightning className="w-4 h-4 text-indigo-400" />
-            <h4 className="text-xs font-semibold text-slate-300">Marine Weather</h4>
+            <h4 className="text-xs font-semibold text-foreground/80">Marine Weather</h4>
           </div>
-          <div className="flex justify-between items-end border-b border-slate-800/60 pb-2">
-            <div className="text-[11px] font-medium text-slate-500 uppercase tracking-wider">Arabian Sea</div>
-            <div className="text-xl font-mono text-slate-100 font-semibold">{weatherData.temperature}°C</div>
+          <div className="flex justify-between items-end border-b border-border/60 pb-2">
+            <div className="text-[11px] font-medium text-muted-foreground/80 uppercase tracking-wider">Arabian Sea</div>
+            <div className="text-xl font-mono text-foreground font-semibold">{weatherData.temperature}°C</div>
           </div>
           <div className="flex justify-between items-end pt-2">
             <div className="text-[10px] text-white/40 uppercase tracking-widest">Wind Speed</div>
@@ -74,9 +77,9 @@ export default function TrackingView({ data }: { data: DashboardData }) {
         </div>
       )}
 
-      <Card className="flex-1 overflow-hidden bg-slate-900/50 border-slate-800/80 rounded-xl relative">
+      <Card className="flex-1 overflow-hidden bg-card/50 border-border/80 rounded-lg relative">
         <CardContent className="p-0 h-full relative">
-          <MapContainer center={position} zoom={5} style={{ height: '100%', width: '100%' }} className="bg-slate-950">
+          <MapContainer center={position} zoom={5} style={{ height: '100%', width: '100%' }} className="bg-background">
             <TileLayer
               attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
               url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
@@ -87,7 +90,7 @@ export default function TrackingView({ data }: { data: DashboardData }) {
               <Marker key={loc.id} position={[loc.lat, loc.lng]} icon={portIcon}>
                 <Popup className="custom-popup">
                   <div className="font-semibold text-slate-900">{loc.name}</div>
-                  <div className="text-xs text-slate-500">{loc.type.replace('_', ' ')}</div>
+                  <div className="text-xs text-muted-foreground/80">{loc.type.replace('_', ' ')}</div>
                 </Popup>
               </Marker>
             ))}
@@ -97,7 +100,7 @@ export default function TrackingView({ data }: { data: DashboardData }) {
               <Marker key={v.id} position={[v.lat, v.lng]} icon={vesselIcon}>
                 <Popup>
                   <div className="font-semibold text-slate-900">{v.name}</div>
-                  <div className="text-xs text-slate-500">{v.class} • {v.speed} knots</div>
+                  <div className="text-xs text-muted-foreground/80">{v.class} • {v.speed} knots</div>
                   <div className="text-xs mt-2 border-t border-slate-200 pt-2">Heading to: <span className="font-medium text-indigo-600">{v.heading}</span></div>
                 </Popup>
               </Marker>

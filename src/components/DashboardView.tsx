@@ -57,7 +57,7 @@ export default function DashboardView({ data }: { data: DashboardData }) {
       trend: "neutral",
       driver: "Requires spot market fixing",
       icon: HelpCircle, 
-      color: "text-slate-400" 
+      color: "text-muted-foreground" 
     }
   ];
 
@@ -79,25 +79,25 @@ export default function DashboardView({ data }: { data: DashboardData }) {
       {/* Outcome Cards Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
         {outcomeCards.map((kpi, i) => (
-          <Card key={i} className="bg-slate-900/50 border-slate-800/80 rounded-xl hover:border-slate-700/80 transition-colors group">
+          <Card key={i} className="bg-card/50 border-border/80 rounded-lg hover:border-border/80/80 transition-colors group">
             <CardContent className="p-5 flex flex-col justify-between h-full">
               <div className="flex items-start justify-between mb-2">
-                <h4 className="text-sm font-semibold text-slate-400">{kpi.title}</h4>
-                <div className={cn("p-1.5 rounded-lg bg-slate-800/50", kpi.color)}>
+                <h4 className="text-sm font-semibold text-muted-foreground">{kpi.title}</h4>
+                <div className={cn("p-1.5 rounded-lg bg-muted/50", kpi.color)}>
                   <kpi.icon className="w-4 h-4" />
                 </div>
               </div>
               <div>
-                <div className="text-2xl font-mono font-semibold text-slate-100 mb-1">{kpi.value}</div>
+                <div className="text-2xl font-mono font-semibold text-foreground mb-1">{kpi.value}</div>
                 <div className={cn("text-xs font-medium mb-2", 
                   kpi.trend === 'down' && kpi.color.includes('emerald') ? 'text-rose-400' :
                   kpi.trend === 'up' && kpi.color.includes('rose') ? 'text-rose-400' :
                   kpi.trend === 'up' && kpi.color.includes('amber') ? 'text-amber-400' :
-                  'text-slate-400'
+                  'text-muted-foreground'
                 )}>
                   {kpi.target}
                 </div>
-                <div className="text-[11px] text-slate-500 font-medium">
+                <div className="text-[11px] text-muted-foreground/80 font-medium">
                   {kpi.driver}
                 </div>
               </div>
@@ -108,40 +108,40 @@ export default function DashboardView({ data }: { data: DashboardData }) {
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         {/* Exception Queue */}
-        <Card className="xl:col-span-2 bg-slate-900/50 border-slate-800/80 rounded-xl flex flex-col">
-          <CardHeader className="border-b border-slate-800/50 bg-slate-950/50 rounded-t-xl px-5 py-4 flex flex-row items-center justify-between">
-            <CardTitle className="text-sm font-semibold text-slate-200 flex items-center gap-2">
+        <Card className="xl:col-span-2 bg-card/50 border-border/80 rounded-lg flex flex-col">
+          <CardHeader className="border-b border-border/50 bg-background/50 rounded-t-xl px-5 py-4 flex flex-row items-center justify-between">
+            <CardTitle className="text-sm font-semibold text-foreground/90 flex items-center gap-2">
               <AlertOctagon className="w-4 h-4 text-rose-500" />
               Exception Queue
             </CardTitle>
-            <div className="text-xs font-medium text-slate-500">4 Unresolved</div>
+            <div className="text-xs font-medium text-muted-foreground/80">4 Unresolved</div>
           </CardHeader>
           <CardContent className="p-0 overflow-auto">
             <table className="w-full text-left border-collapse">
               <thead>
-                <tr className="border-b border-slate-800/50 bg-slate-900/30">
-                  <th className="p-3 pl-5 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Severity</th>
-                  <th className="p-3 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Exception</th>
-                  <th className="p-3 text-[11px] font-semibold text-slate-500 uppercase tracking-wider text-right">Time to Impact</th>
-                  <th className="p-3 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Estimated Impact</th>
-                  <th className="p-3 pr-5 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Recommended Action</th>
+                <tr className="border-b border-border/50 bg-card/30">
+                  <th className="p-3 pl-5 text-[11px] font-semibold text-muted-foreground/80 uppercase tracking-wider">Severity</th>
+                  <th className="p-3 text-[11px] font-semibold text-muted-foreground/80 uppercase tracking-wider">Exception</th>
+                  <th className="p-3 text-[11px] font-semibold text-muted-foreground/80 uppercase tracking-wider text-right">Time to Impact</th>
+                  <th className="p-3 text-[11px] font-semibold text-muted-foreground/80 uppercase tracking-wider">Estimated Impact</th>
+                  <th className="p-3 pr-5 text-[11px] font-semibold text-muted-foreground/80 uppercase tracking-wider">Recommended Action</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-800/50">
+              <tbody className="divide-y divide-border/50">
                 {exceptionQueue.map((ex, i) => (
-                  <tr key={i} className="hover:bg-slate-800/30 transition-colors group cursor-pointer">
+                  <tr key={i} className="hover:bg-muted/30 transition-colors group cursor-pointer">
                     <td className="p-3 pl-5">
                       <span className={cn("px-2 py-1 rounded text-[10px] font-semibold border",
                         ex.severity === 'Critical' ? "bg-rose-500/10 text-rose-400 border-rose-500/20" :
                         ex.severity === 'Warning' ? "bg-amber-500/10 text-amber-400 border-amber-500/20" :
-                        "bg-slate-800 text-slate-400 border-slate-700"
+                        "bg-muted text-muted-foreground border-border/80"
                       )}>
                         {ex.severity}
                       </span>
                     </td>
-                    <td className="p-3 text-sm font-medium text-slate-200">{ex.issue}</td>
-                    <td className="p-3 text-sm font-mono text-slate-400 text-right">{ex.impactTime}</td>
-                    <td className="p-3 text-sm text-slate-400">{ex.impact}</td>
+                    <td className="p-3 text-sm font-medium text-foreground/90">{ex.issue}</td>
+                    <td className="p-3 text-sm font-mono text-muted-foreground text-right">{ex.impactTime}</td>
+                    <td className="p-3 text-sm text-muted-foreground">{ex.impact}</td>
                     <td className="p-3 pr-5 text-sm text-indigo-400 font-medium hover:text-indigo-300 transition-colors">{ex.action}</td>
                   </tr>
                 ))}
@@ -151,29 +151,29 @@ export default function DashboardView({ data }: { data: DashboardData }) {
         </Card>
 
         {/* Recommended Decisions */}
-        <Card className="bg-slate-900/50 border-slate-800/80 rounded-xl flex flex-col">
-          <CardHeader className="border-b border-slate-800/50 bg-slate-950/50 rounded-t-xl px-5 py-4">
-            <CardTitle className="text-sm font-semibold text-slate-200 flex items-center gap-2">
+        <Card className="bg-card/50 border-border/80 rounded-lg flex flex-col">
+          <CardHeader className="border-b border-border/50 bg-background/50 rounded-t-xl px-5 py-4">
+            <CardTitle className="text-sm font-semibold text-foreground/90 flex items-center gap-2">
               <CheckCircle2 className="w-4 h-4 text-emerald-500" />
               Recommended Decisions
             </CardTitle>
           </CardHeader>
           <CardContent className="p-0">
-            <div className="divide-y divide-slate-800/50">
+            <div className="divide-y divide-border/50">
               {pendingDecisions.map(decision => (
-                <div key={decision.id} className="p-5 hover:bg-slate-800/30 transition-colors">
+                <div key={decision.id} className="p-5 hover:bg-muted/30 transition-colors">
                   <div className="flex justify-between items-start mb-2">
-                    <h5 className="text-sm font-medium text-slate-200">{decision.action}</h5>
+                    <h5 className="text-sm font-medium text-foreground/90">{decision.action}</h5>
                     <span className="text-[10px] font-mono text-rose-400 bg-rose-500/10 px-1.5 py-0.5 rounded ml-2 whitespace-nowrap">
                       {decision.deadline}
                     </span>
                   </div>
-                  <p className="text-xs text-slate-400 mb-4">{decision.impact}</p>
+                  <p className="text-xs text-muted-foreground mb-4">{decision.impact}</p>
                   <div className="flex gap-2">
                     <button className="flex-1 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium rounded-lg transition-colors">
                       Approve
                     </button>
-                    <button className="flex-1 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs font-medium rounded-lg transition-colors">
+                    <button className="flex-1 py-1.5 bg-muted hover:bg-accent text-foreground/80 border border-border/80 text-xs font-medium rounded-lg transition-colors">
                       Review
                     </button>
                   </div>
