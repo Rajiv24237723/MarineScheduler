@@ -21,7 +21,7 @@ export function dismiss(id: number) { items = items.filter(t => t.id !== id); em
 const styles: Record<ToastKind, { icon: any; cls: string }> = {
   success: { icon: CheckCircle2, cls: 'text-emerald-400 border-emerald-500/30' },
   error: { icon: AlertTriangle, cls: 'text-red-400 border-red-500/30' },
-  info: { icon: Info, cls: 'text-indigo-300 border-indigo-500/30' },
+  info: { icon: Info, cls: 'text-sky-300 border-sky-500/30' },
 };
 
 export function Toaster() {

@@ -18,14 +18,14 @@ export default function SettingsView({ data, stream, attempts, setAttempts, onRe
       <h3 className="text-lg font-semibold text-foreground">Settings</h3>
 
       <Card className="bg-card/50 border-border/80 rounded-lg">
-        <CardHeader className="py-2.5 px-4 border-b border-border/60"><CardTitle className="text-xs font-semibold text-foreground/80 flex items-center gap-2"><Sliders className="w-3.5 h-3.5 text-indigo-400" /> Optimizer</CardTitle></CardHeader>
+        <CardHeader className="py-2.5 px-4 border-b border-border/60"><CardTitle className="text-xs font-semibold text-foreground/80 flex items-center gap-2"><Sliders className="w-3.5 h-3.5 text-sky-400" /> Optimizer</CardTitle></CardHeader>
         <CardContent className="p-4 space-y-3">
           <div>
             <div className="flex justify-between text-xs mb-1"><label className="text-muted-foreground">Solver effort (multi-start attempts)</label><span className="font-mono text-foreground/90">{attempts}</span></div>
-            <input type="range" min={4} max={20} value={attempts} onChange={e => setAttempts(Number(e.target.value))} className="w-full accent-indigo-500" />
+            <input type="range" min={4} max={20} value={attempts} onChange={e => setAttempts(Number(e.target.value))} className="w-full accent-sky-500" />
             <div className="flex justify-between text-[10px] text-muted-foreground/70 mt-0.5"><span>faster</span><span>higher-quality plans</span></div>
           </div>
-          <p className="text-[11px] text-muted-foreground flex items-start gap-1.5"><Info className="w-3.5 h-3.5 mt-0.5 shrink-0" /> Each attempt is a fresh greedy construction with perturbed routing; the best feasible, lowest-cost plan is kept. The search stops early once all demand is served. Applies to the next <span className="text-indigo-400">Run Optimizer</span>.</p>
+          <p className="text-[11px] text-muted-foreground flex items-start gap-1.5"><Info className="w-3.5 h-3.5 mt-0.5 shrink-0" /> Each attempt is a fresh greedy construction with perturbed routing; the best feasible, lowest-cost plan is kept. The search stops early once all demand is served. Applies to the next <span className="text-sky-400">Run Optimizer</span>.</p>
         </CardContent>
       </Card>
 

@@ -54,14 +54,14 @@ export default function TrackingView({ data }: { data: DashboardData }) {
         <h3 className="text-lg font-semibold text-foreground">Live Fleet — voyage playback</h3>
         <div className="flex items-center gap-3">
           <span className="text-[11px] text-muted-foreground">As of {format(addDays(START, asOf), 'MMM d')}</span>
-          <input type="range" min={0} max={maxDay} value={asOf} onChange={e => setAsOf(Number(e.target.value))} className="w-48 accent-indigo-500" />
-          <span className="inline-flex items-center rounded-md bg-indigo-500/10 px-3 py-1 text-[11px] font-medium text-indigo-400 ring-1 ring-inset ring-indigo-500/30">{live.length} at sea/port</span>
+          <input type="range" min={0} max={maxDay} value={asOf} onChange={e => setAsOf(Number(e.target.value))} className="w-48 accent-sky-500" />
+          <span className="inline-flex items-center rounded-md bg-sky-500/10 px-3 py-1 text-[11px] font-medium text-sky-400 ring-1 ring-inset ring-sky-500/30">{live.length} at sea/port</span>
         </div>
       </div>
 
       {weather && (
         <div className="absolute top-20 right-8 z-[1000] bg-background/80 p-4 rounded-lg shadow-lg border border-border/80 w-56 backdrop-blur-md">
-          <div className="flex items-center gap-2 mb-2"><CloudLightning className="w-4 h-4 text-indigo-400" /><h4 className="text-xs font-semibold text-foreground/80">Marine Weather (Arabian Sea)</h4></div>
+          <div className="flex items-center gap-2 mb-2"><CloudLightning className="w-4 h-4 text-sky-400" /><h4 className="text-xs font-semibold text-foreground/80">Marine Weather (Arabian Sea)</h4></div>
           <div className="flex justify-between items-end border-b border-border/60 pb-2"><div className="text-[11px] text-muted-foreground/80 uppercase">Temp</div><div className="text-xl font-mono text-foreground font-semibold">{weather.temperature}°C</div></div>
           <div className="flex justify-between items-end pt-2"><div className="text-[10px] text-white/40 uppercase tracking-widest">Wind</div><div className="text-sm font-mono text-purple-400">{weather.windspeed} kn</div></div>
         </div>
@@ -82,8 +82,8 @@ export default function TrackingView({ data }: { data: DashboardData }) {
                 <Popup>
                   <div className="font-semibold text-slate-900">{v.name}</div>
                   <div className="text-xs">{v.cls}</div>
-                  <div className="text-xs mt-1 border-t border-slate-200 pt-1">{v.status} → <span className="font-medium text-indigo-600">{v.heading}</span></div>
-                  <button onClick={() => setModalVoyage(v.voyage)} className="mt-2 w-full px-2 py-1 bg-indigo-600 text-white rounded text-[11px] font-medium">View full voyage plan</button>
+                  <div className="text-xs mt-1 border-t border-slate-200 pt-1">{v.status} → <span className="font-medium text-sky-600">{v.heading}</span></div>
+                  <button onClick={() => setModalVoyage(v.voyage)} className="mt-2 w-full px-2 py-1 bg-sky-600 text-white rounded text-[11px] font-medium">View full voyage plan</button>
                 </Popup>
               </Marker>
             ))}

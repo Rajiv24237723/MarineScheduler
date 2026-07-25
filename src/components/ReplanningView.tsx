@@ -83,7 +83,7 @@ export default function ReplanningView({ data, stream, refresh }: { data: Dashbo
             <label className="text-xs text-muted-foreground">Recovery mode</label>
             <div className="grid grid-cols-3 gap-2 mt-1">
               {[['minimal-edit', 'Minimal-edit', 'Change only the voyages the disruption forces (destroy/repair)'], ['minimal-change', 'Minimal-change', 'Freeze the next ~2 weeks too'], ['cost-optimal', 'Cost-optimal', 'Re-plan the whole future for lowest cost']].map(([id, label, desc]) => (
-                <button key={id} onClick={() => setMode(id)} className={`text-left px-2.5 py-2 rounded-lg border text-xs ${mode === id ? 'bg-indigo-500/10 border-indigo-500/40 text-foreground' : 'bg-background/50 border-border/70 text-muted-foreground hover:text-foreground/80'}`}>
+                <button key={id} onClick={() => setMode(id)} className={`text-left px-2.5 py-2 rounded-lg border text-xs ${mode === id ? 'bg-sky-500/10 border-sky-500/40 text-foreground' : 'bg-background/50 border-border/70 text-muted-foreground hover:text-foreground/80'}`}>
                   <div className="font-medium">{label}</div><div className="text-[10px] mt-0.5 text-muted-foreground leading-tight">{desc}</div>
                 </button>
               ))}
@@ -126,16 +126,16 @@ export default function ReplanningView({ data, stream, refresh }: { data: Dashbo
             {events.length > 0 && <div className="flex flex-wrap gap-1 pt-1">{events.map((e, i) => <span key={i} className="px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[10px]">{e}</span>)}</div>}
             <div className="flex gap-2 pt-1">
               <button disabled={busy || !hasEvents} onClick={doCheck} className="px-3 py-1.5 bg-muted hover:bg-accent border border-border/80 rounded-lg disabled:opacity-50">Check impact</button>
-              <button disabled={busy || !hasEvents} onClick={doSimulate} className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg disabled:opacity-50">{busy ? 'Solving…' : 'Simulate recovery (draft)'}</button>
+              <button disabled={busy || !hasEvents} onClick={doSimulate} className="px-3 py-1.5 bg-sky-600 hover:bg-sky-500 text-white rounded-lg disabled:opacity-50">{busy ? 'Solving…' : 'Simulate recovery (draft)'}</button>
             </div>
           </CardContent>
         </Card>
 
         {/* Draft recovery result */}
-        <Card className={`bg-card/50 rounded-lg ${draft ? 'border-indigo-500/30' : 'border-border/80'}`}>
+        <Card className={`bg-card/50 rounded-lg ${draft ? 'border-sky-500/30' : 'border-border/80'}`}>
           <CardHeader className="py-2.5 px-4 border-b border-border/60"><CardTitle className="text-xs font-semibold text-foreground/80">Recovery draft</CardTitle></CardHeader>
           <CardContent className="p-3 text-xs">
-            {!draft ? <div className="text-muted-foreground p-2">Compose events and simulate — the recovery is saved as a <span className="text-indigo-300">draft</span>; your operating plan is untouched until you publish.</div> : (
+            {!draft ? <div className="text-muted-foreground p-2">Compose events and simulate — the recovery is saved as a <span className="text-sky-300">draft</span>; your operating plan is untouched until you publish.</div> : (
               <div className="space-y-3">
                 <div className="grid grid-cols-2 gap-2">
                   {[['Served', `${draft.kpis.demandServedPct}%`], ['Total cost', money(draft.kpis.totalCost)], ['Voyages', String(draft.kpis.voyageCount)], ['Charter recs', String(draft.kpis.charterRecommendationCount)]].map(([l, v]) => (
@@ -197,7 +197,7 @@ export default function ReplanningView({ data, stream, refresh }: { data: Dashbo
               <div key={v.id} className="flex items-center justify-between px-4 py-2.5 text-xs hover:bg-muted/20">
                 <button onClick={() => openVersion(v.id, v.version)} className="flex items-center gap-3 text-left">
                   <span className="font-mono text-foreground/90">v{v.version}</span>
-                  <span className={`px-1.5 py-0.5 rounded text-[9px] ${v.status === 'Active' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : v.status === 'Draft' ? 'bg-indigo-500/10 text-indigo-300 border border-indigo-500/20' : 'bg-muted text-muted-foreground border border-border/60'}`}>{v.status}</span>
+                  <span className={`px-1.5 py-0.5 rounded text-[9px] ${v.status === 'Active' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : v.status === 'Draft' ? 'bg-sky-500/10 text-sky-300 border border-sky-500/20' : 'bg-muted text-muted-foreground border border-border/60'}`}>{v.status}</span>
                   <span className="text-muted-foreground">{v.trigger}</span>
                   <span className={v.achievable ? 'text-emerald-400' : 'text-red-400'}>{v.achievable ? 'achievable' : 'shortfall'}</span>
                 </button>
@@ -217,7 +217,7 @@ export default function ReplanningView({ data, stream, refresh }: { data: Dashbo
         {versionVoyages && <div className="space-y-1.5">
           {versionVoyages.voyages.length === 0 ? <div className="text-xs text-muted-foreground">No voyages.</div> :
             versionVoyages.voyages.map(v => (
-              <button key={v.id} onClick={() => setVoyageModal(v)} className="w-full text-left flex items-center justify-between bg-background/50 rounded-lg border border-border/70 px-3 py-2 text-xs hover:border-indigo-500/40">
+              <button key={v.id} onClick={() => setVoyageModal(v)} className="w-full text-left flex items-center justify-between bg-background/50 rounded-lg border border-border/70 px-3 py-2 text-xs hover:border-sky-500/40">
                 <span className="flex items-center gap-2"><Ship className="w-3.5 h-3.5 text-sky-400" /> <span className="font-mono text-foreground/90">{v.vesselName}</span> <span className={v.pool === 'SPOT' ? 'text-amber-400' : 'text-muted-foreground'}>{v.pool}</span></span>
                 <span className="text-muted-foreground">{v.stops.length} stops · {money(v.cost)} ›</span>
               </button>

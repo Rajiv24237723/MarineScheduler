@@ -29,12 +29,12 @@ export default function SchedulerView({ data, onOptimize, optimizing }: { data: 
             ? <span className="px-3 py-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full text-[10px] font-medium tracking-wider">ACHIEVABLE · {k.demandServedPct}% SERVED</span>
             : <span className="px-3 py-1 bg-red-500/10 text-red-400 border border-red-500/20 rounded-full text-[10px] font-medium tracking-wider">SHORTFALL · {k.demandServedPct}% SERVED</span>)}
         </div>
-        <button onClick={onOptimize} disabled={optimizing} className="px-6 py-2 bg-indigo-600 text-white rounded-lg text-xs font-medium hover:bg-indigo-500 transition-colors disabled:opacity-50 shadow-sm">
+        <button onClick={onOptimize} disabled={optimizing} className="px-6 py-2 bg-sky-600 text-white rounded-lg text-xs font-medium hover:bg-sky-500 transition-colors disabled:opacity-50 shadow-sm">
           {optimizing ? 'Optimizing…' : 'Run Optimizer'}
         </button>
       </div>
 
-      {!hasPlan && <Card className="bg-card/50 border-border/80 rounded-lg"><CardContent className="p-8 text-center text-sm text-muted-foreground">No plan yet — click <span className="text-indigo-400 font-medium">Run Optimizer</span> to build the {data.stream} movement schedule.</CardContent></Card>}
+      {!hasPlan && <Card className="bg-card/50 border-border/80 rounded-lg"><CardContent className="p-8 text-center text-sm text-muted-foreground">No plan yet — click <span className="text-sky-400 font-medium">Run Optimizer</span> to build the {data.stream} movement schedule.</CardContent></Card>}
 
       {hasPlan && (
       <div className="grid grid-cols-5 gap-3">

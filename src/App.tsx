@@ -50,7 +50,7 @@ export default function App() {
 
   if (!data) return (
     <div className="flex flex-col items-center justify-center h-screen w-screen bg-background text-muted-foreground gap-3">
-      <div className="w-6 h-6 rounded-full border-2 border-indigo-500/30 border-t-indigo-400 animate-spin" />
+      <div className="w-6 h-6 rounded-full border-2 border-sky-500/30 border-t-sky-400 animate-spin" />
       <span className="text-sm">Loading Marine Scheduler…</span>
     </div>
   );
@@ -98,13 +98,13 @@ export default function App() {
   const activeTabLabel = allTabs.find(t => t.id === activeTab)?.label || (activeTab === 'settings' ? 'Settings' : 'Command Center');
 
   return (
-    <div className="flex h-screen w-full bg-background text-foreground overflow-hidden font-sans selection:bg-indigo-500/30">
+    <div className="flex h-screen w-full bg-background text-foreground overflow-hidden font-sans selection:bg-sky-500/30">
       {/* Refined Sidebar */}
       <div className="w-64 border-r border-border/60 bg-card/80 backdrop-blur-md flex flex-col z-10 flex-shrink-0">
         <div className="h-16 flex flex-col justify-center px-5 border-b border-border/60">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-indigo-500/10 flex items-center justify-center border border-indigo-500/20">
-              <Ship className="w-4 h-4 text-indigo-400" />
+            <div className="w-8 h-8 rounded-lg bg-sky-500/10 flex items-center justify-center border border-sky-500/20">
+              <Ship className="w-4 h-4 text-sky-400" />
             </div>
             <div>
               <h1 className="font-semibold text-sm tracking-tight text-foreground">Marine Scheduler</h1>
@@ -147,13 +147,13 @@ export default function App() {
                   className={cn(
                     "flex items-center px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 group w-full text-left",
                     activeTab === tab.id 
-                      ? "bg-indigo-500/10 text-indigo-300" 
+                      ? "bg-sky-500/10 text-sky-300" 
                       : "text-muted-foreground hover:bg-muted hover:text-foreground/90"
                   )}
                 >
                   <tab.icon className={cn(
                     "w-4 h-4 mr-3 transition-transform duration-200",
-                    activeTab === tab.id ? "text-indigo-400" : "text-muted-foreground/80 group-hover:text-foreground/80"
+                    activeTab === tab.id ? "text-sky-400" : "text-muted-foreground/80 group-hover:text-foreground/80"
                   )} />
                   <span className="truncate">{tab.label}</span>
                 </button>
@@ -163,8 +163,8 @@ export default function App() {
         </div>
 
         <div className="p-4 border-t border-border/60">
-          <button onClick={() => setActiveTab('settings')} className={cn("flex items-center w-full px-3 py-2 text-sm font-medium rounded-lg transition-colors", activeTab === 'settings' ? "bg-indigo-500/10 text-indigo-300" : "text-muted-foreground hover:text-foreground/90 hover:bg-muted")}>
-            <Settings className={cn("w-4 h-4 mr-3", activeTab === 'settings' ? "text-indigo-400" : "text-muted-foreground/80")} />
+          <button onClick={() => setActiveTab('settings')} className={cn("flex items-center w-full px-3 py-2 text-sm font-medium rounded-lg transition-colors", activeTab === 'settings' ? "bg-sky-500/10 text-sky-300" : "text-muted-foreground hover:text-foreground/90 hover:bg-muted")}>
+            <Settings className={cn("w-4 h-4 mr-3", activeTab === 'settings' ? "text-sky-400" : "text-muted-foreground/80")} />
             <span className="truncate">Settings</span>
           </button>
         </div>
@@ -173,13 +173,13 @@ export default function App() {
       {/* Main Content */}
       <div className="flex-1 flex flex-col min-w-0 z-10 relative bg-background">
         {/* Subtle background radial gradient for depth */}
-        <div className="absolute top-0 left-0 w-full h-[300px] bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-indigo-500/5 via-background to-background pointer-events-none opacity-50"></div>
+        <div className="absolute top-0 left-0 w-full h-[300px] bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-sky-500/5 via-background to-background pointer-events-none opacity-50"></div>
 
         {/* Global Context Header */}
         <header className="h-16 flex items-center justify-between px-8 border-b border-border/60 bg-card/80 backdrop-blur-md relative z-20 shadow-sm">
           <div className="flex flex-col">
             <div className="flex items-center gap-4 text-xs font-mono text-muted-foreground">
-              <span className="flex items-center gap-1.5"><span className="text-muted-foreground/80">ACTIVE PLAN:</span> <span className="text-foreground/90 font-medium font-sans">Jul-Aug 2026 · {stream}</span> {activeVersion ? <span className="text-indigo-400 border border-indigo-400/30 px-1.5 py-0.5 rounded text-[10px] font-sans font-medium">v{activeVersion.version}</span> : <span className="text-muted-foreground/60 font-sans">no plan yet</span>}</span>
+              <span className="flex items-center gap-1.5"><span className="text-muted-foreground/80">ACTIVE PLAN:</span> <span className="text-foreground/90 font-medium font-sans">Jul-Aug 2026 · {stream}</span> {activeVersion ? <span className="text-sky-400 border border-sky-400/30 px-1.5 py-0.5 rounded text-[10px] font-sans font-medium">v{activeVersion.version}</span> : <span className="text-muted-foreground/60 font-sans">no plan yet</span>}</span>
               <span className="text-border">|</span>
               <span className="flex items-center gap-1.5"><span className="text-muted-foreground/80">HORIZON:</span> <span className="font-sans">01 Jul - 31 Aug 2026</span></span>
               <span className="text-border">|</span>
@@ -190,7 +190,7 @@ export default function App() {
             <button onClick={() => setActiveTab('replan')} className="px-3 py-1.5 text-xs font-medium bg-muted hover:bg-accent border border-border/80 rounded-md text-foreground/90 transition-colors">
               Versions
             </button>
-            <button onClick={runOptimize} disabled={optimizing} className="px-3 py-1.5 text-xs font-medium bg-indigo-600 hover:bg-indigo-500 text-white rounded-md transition-colors shadow-sm disabled:opacity-50">
+            <button onClick={runOptimize} disabled={optimizing} className="px-3 py-1.5 text-xs font-medium bg-sky-600 hover:bg-sky-500 text-white rounded-md transition-colors shadow-sm disabled:opacity-50">
               {optimizing ? 'Optimizing…' : 'Run Optimizer'}
             </button>
           </div>

@@ -111,15 +111,15 @@ export default function MasterDataView({ stream, data, refresh }: { stream: stri
         <div className="flex gap-2">
           <button onClick={() => { setCsvText(toCSV(rows, cfg.cols)); setImportOpen(true); }} className="flex items-center gap-1.5 px-3 py-1.5 bg-muted hover:bg-accent border border-border/80 rounded-lg text-xs"><Upload className="w-3.5 h-3.5" /> Import CSV</button>
           <button onClick={exportCSV} className="flex items-center gap-1.5 px-3 py-1.5 bg-muted hover:bg-accent border border-border/80 rounded-lg text-xs"><Download className="w-3.5 h-3.5" /> Export</button>
-          <button onClick={add} className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs"><Plus className="w-3.5 h-3.5" /> Add row</button>
+          <button onClick={add} className="flex items-center gap-1.5 px-3 py-1.5 bg-sky-600 hover:bg-sky-500 text-white rounded-lg text-xs"><Plus className="w-3.5 h-3.5" /> Add row</button>
         </div>
       </div>
       <div className="flex gap-1 border-b border-border/60 flex-wrap">
         {Object.keys(TABS).map(t => (
-          <button key={t} onClick={() => setTab(t)} className={`px-3 py-2 text-xs font-medium -mb-px border-b-2 ${tab === t ? 'border-indigo-500 text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground/80'}`}>{t}</button>
+          <button key={t} onClick={() => setTab(t)} className={`px-3 py-2 text-xs font-medium -mb-px border-b-2 ${tab === t ? 'border-sky-500 text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground/80'}`}>{t}</button>
         ))}
       </div>
-      {cfg.note && <p className="text-[11px] text-indigo-300/80 -mt-1">{cfg.note}</p>}
+      {cfg.note && <p className="text-[11px] text-sky-300/80 -mt-1">{cfg.note}</p>}
       <Card className="bg-card/50 border-border/80 rounded-lg">
         <CardContent className="p-0 overflow-auto max-h-[62vh]">
           <table className="w-full text-xs">
@@ -131,11 +131,11 @@ export default function MasterDataView({ stream, data, refresh }: { stream: stri
                     <td key={c.key} className="px-2 py-1">
                       <input defaultValue={row[c.key]} type={c.num ? 'number' : 'text'} readOnly={c.key === 'id'}
                         onBlur={e => { if (c.key !== 'id' && String(e.target.value) !== String(row[c.key])) put(row.id, c.key, e.target.value, c.num); }}
-                        className="w-full bg-transparent px-1.5 py-1 rounded border border-transparent hover:border-border/60 focus:border-indigo-500/50 focus:bg-background/50 outline-none text-foreground/90 read-only:text-muted-foreground/60" />
+                        className="w-full bg-transparent px-1.5 py-1 rounded border border-transparent hover:border-border/60 focus:border-sky-500/50 focus:bg-background/50 outline-none text-foreground/90 read-only:text-muted-foreground/60" />
                     </td>
                   ))}
                   <td className="px-2"><div className="flex items-center gap-2 justify-end">
-                    {tab === 'Vessels' && <button onClick={() => setVesselDetail(row as Vessel)} className="text-muted-foreground hover:text-indigo-400" title="Vessel details"><Maximize2 className="w-3.5 h-3.5" /></button>}
+                    {tab === 'Vessels' && <button onClick={() => setVesselDetail(row as Vessel)} className="text-muted-foreground hover:text-sky-400" title="Vessel details"><Maximize2 className="w-3.5 h-3.5" /></button>}
                     <button onClick={() => del(row.id)} className="text-muted-foreground hover:text-red-400" title="Delete"><Trash2 className="w-3.5 h-3.5" /></button>
                   </div></td>
                 </tr>
@@ -145,16 +145,16 @@ export default function MasterDataView({ stream, data, refresh }: { stream: stri
           </table>
         </CardContent>
       </Card>
-      <p className="text-[11px] text-muted-foreground">Edit a cell and click away to save. Changes take effect on the next <span className="text-indigo-400">Run Optimizer</span>.</p>
+      <p className="text-[11px] text-muted-foreground">Edit a cell and click away to save. Changes take effect on the next <span className="text-sky-400">Run Optimizer</span>.</p>
 
       {/* CSV import modal */}
       <Modal open={importOpen} onClose={() => setImportOpen(false)} title={`Import ${tab} (CSV)`} subtitle={`Stream ${stream} · header row required (id optional)`} width="max-w-2xl">
         <div className="space-y-3">
           <input type="file" accept=".csv,text/csv" onChange={e => onFile(e.target.files?.[0])} className="text-xs text-muted-foreground" />
-          <textarea value={csvText} onChange={e => setCsvText(e.target.value)} spellCheck={false} className="w-full h-56 bg-background/60 border border-border/70 rounded-lg p-2 font-mono text-[11px] text-foreground/90 outline-none focus:border-indigo-500/50" />
+          <textarea value={csvText} onChange={e => setCsvText(e.target.value)} spellCheck={false} className="w-full h-56 bg-background/60 border border-border/70 rounded-lg p-2 font-mono text-[11px] text-foreground/90 outline-none focus:border-sky-500/50" />
           <div className="flex justify-end gap-2">
             <button onClick={() => doImport(false)} disabled={importing} className="px-3 py-1.5 bg-muted hover:bg-accent border border-border/80 rounded-lg text-xs disabled:opacity-50">Append rows</button>
-            <button onClick={() => doImport(true)} disabled={importing} className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs disabled:opacity-50">{importing ? 'Importing…' : `Replace all ${stream} rows`}</button>
+            <button onClick={() => doImport(true)} disabled={importing} className="px-3 py-1.5 bg-sky-600 hover:bg-sky-500 text-white rounded-lg text-xs disabled:opacity-50">{importing ? 'Importing…' : `Replace all ${stream} rows`}</button>
           </div>
         </div>
       </Modal>
@@ -176,7 +176,7 @@ export default function MasterDataView({ stream, data, refresh }: { stream: stri
                 <div className="text-[11px] font-medium text-muted-foreground mb-1.5">Compartment layout</div>
                 <div className="space-y-1.5">{v.compartments.map(c => (
                   <div key={c.id} className="flex items-center gap-2"><span className="w-10 text-[11px] font-mono text-foreground/80">{c.id}</span>
-                    <div className="flex-1 h-5 rounded bg-muted/40 overflow-hidden border border-border/60"><div className="h-full bg-indigo-500/50 flex items-center px-2" style={{ width: `${(c.cap / maxCap) * 100}%` }}><span className="text-[10px] font-mono text-foreground/90">{c.cap.toLocaleString()} MT</span></div></div>
+                    <div className="flex-1 h-5 rounded bg-muted/40 overflow-hidden border border-border/60"><div className="h-full bg-sky-500/50 flex items-center px-2" style={{ width: `${(c.cap / maxCap) * 100}%` }}><span className="text-[10px] font-mono text-foreground/90">{c.cap.toLocaleString()} MT</span></div></div>
                   </div>))}
                 </div>
               </div>

@@ -14,7 +14,7 @@ export default function DashboardView({ data, onGoto }: { data: DashboardData; o
   const hasPlan = (data.versions?.length ?? 0) > 0;
 
   const cards = [
-    { label: 'Plan cost', value: fmtM(k.totalCost), icon: IndianRupee, tint: 'text-indigo-400' },
+    { label: 'Plan cost', value: fmtM(k.totalCost), icon: IndianRupee, tint: 'text-sky-400' },
     { label: 'Demand served', value: `${k.demandServedPct}%`, icon: CheckCircle2, tint: k.demandServedPct >= 100 ? 'text-emerald-400' : 'text-amber-400' },
     { label: 'Voyages planned', value: String(k.voyageCount), icon: Ship, tint: 'text-sky-400' },
     { label: 'Charter recs', value: String(k.charterRecommendationCount), icon: Anchor, tint: k.charterRecommendationCount > 0 ? 'text-amber-400' : 'text-muted-foreground' },
@@ -42,7 +42,7 @@ export default function DashboardView({ data, onGoto }: { data: DashboardData; o
 
       {!hasPlan && (
         <Card className="bg-card/50 border-border/80 rounded-lg"><CardContent className="p-6 text-center text-sm text-muted-foreground">
-          No active plan for {data.stream}. Open <button className="text-indigo-400 font-medium" onClick={() => onGoto?.('scheduler')}>Operational Plan</button> and run the optimizer.
+          No active plan for {data.stream}. Open <button className="text-sky-400 font-medium" onClick={() => onGoto?.('scheduler')}>Operational Plan</button> and run the optimizer.
         </CardContent></Card>
       )}
 
@@ -74,7 +74,7 @@ export default function DashboardView({ data, onGoto }: { data: DashboardData; o
                   <div className="text-foreground/90"><span className="text-amber-400 font-medium">Charter {r.vesselClass}</span> · {prod(r.productId)} {r.qty ? `${Math.round(r.qty / 1000)}k MT` : ''}</div>
                   <div className="text-[11px] text-muted-foreground mt-0.5">{r.fromLoc ? loc(r.fromLoc) : 'source'} → {loc(r.toLoc)} · by day {r.byDay}</div>
                 </div>
-                <button onClick={() => onGoto?.('scheduler')} className="ml-3 px-2.5 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded text-[10px] font-medium whitespace-nowrap">Review</button>
+                <button onClick={() => onGoto?.('scheduler')} className="ml-3 px-2.5 py-1 bg-sky-600 hover:bg-sky-500 text-white rounded text-[10px] font-medium whitespace-nowrap">Review</button>
               </div>
             ))}
         </CardContent>
@@ -90,7 +90,7 @@ export default function DashboardView({ data, onGoto }: { data: DashboardData; o
             <div className="bg-background/50 rounded-lg border border-border/70 p-3 text-xs text-muted-foreground">{detail.action}</div>
             <div className="flex gap-2">
               <button onClick={() => { setDetail(null); onGoto?.('inventory'); }} className="px-3 py-1.5 bg-muted hover:bg-accent border border-border/80 rounded-lg text-xs">Open Inventory Forecast</button>
-              <button onClick={() => { setDetail(null); onGoto?.('scheduler'); }} className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs">Open Operational Plan</button>
+              <button onClick={() => { setDetail(null); onGoto?.('scheduler'); }} className="px-3 py-1.5 bg-sky-600 hover:bg-sky-500 text-white rounded-lg text-xs">Open Operational Plan</button>
             </div>
           </div>
         )}

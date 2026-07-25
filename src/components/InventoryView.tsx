@@ -63,10 +63,10 @@ export default function InventoryView({ data }: { data: DashboardData }) {
             <div className="grid grid-cols-2 gap-2">
               {atRisk.map(p => (
                 <div key={`${p.locationId}|${p.productId}`} className="flex justify-between items-center bg-background/50 p-2 rounded-lg border border-border/80 text-xs">
-                  <button className="text-foreground/80 hover:text-indigo-300" onClick={() => setKey(`${p.locationId}|${p.productId}`)}>{p.locationName} · {p.productName}</button>
+                  <button className="text-foreground/80 hover:text-sky-300" onClick={() => setKey(`${p.locationId}|${p.productId}`)}>{p.locationName} · {p.productName}</button>
                   <div className="flex items-center gap-2">
                     <span className={p.firstDryOutDay !== null ? 'text-red-400' : 'text-amber-400'}>{p.firstDryOutDay !== null ? `dry-out d${p.firstDryOutDay}` : `tank-top d${p.firstTankTopDay}`}</span>
-                    {tankFor(p.locationId, p.productId) && <button onClick={() => setOpenTank(tankFor(p.locationId, p.productId))} className="px-2 py-0.5 rounded bg-indigo-600 hover:bg-indigo-500 text-white text-[10px]">Tank ›</button>}
+                    {tankFor(p.locationId, p.productId) && <button onClick={() => setOpenTank(tankFor(p.locationId, p.productId))} className="px-2 py-0.5 rounded bg-sky-600 hover:bg-sky-500 text-white text-[10px]">Tank ›</button>}
                   </div>
                 </div>
               ))}

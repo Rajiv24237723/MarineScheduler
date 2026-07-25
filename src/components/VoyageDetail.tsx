@@ -51,7 +51,7 @@ export function VoyageDetail({ voyage, locations, products, vessels = [] }: { vo
           <VesselStowage compartments={vessel.compartments} stow={stow} products={products} current={current} />
           <div className="mt-2 flex items-center gap-2">
             <span className="text-[10px] text-muted-foreground whitespace-nowrap">As of {format(addDays(START, asOf), 'MMM d')}</span>
-            <input type="range" min={voyage.startDay} max={voyage.endDay} value={asOf} onChange={e => setAsOf(Number(e.target.value))} className="flex-1 accent-indigo-500" />
+            <input type="range" min={voyage.startDay} max={voyage.endDay} value={asOf} onChange={e => setAsOf(Number(e.target.value))} className="flex-1 accent-sky-500" />
             <span className="text-[10px] text-muted-foreground whitespace-nowrap">{inTransit ? (asOf >= voyage.endDay ? 'voyage complete (empty)' : 'in transit') : ''}</span>
           </div>
         </div>
@@ -75,7 +75,7 @@ export function VoyageDetail({ voyage, locations, products, vessels = [] }: { vo
         <div className="space-y-1">
           {voyage.stops.map(s => (
             <div key={s.seq} className="flex items-center gap-2 bg-background/50 rounded-lg border border-border/60 px-3 py-1.5 text-xs">
-              <span className={`px-1.5 py-0.5 rounded text-[9px] font-medium ${s.kind === 'LOAD' ? 'bg-indigo-500/15 text-indigo-400' : 'bg-emerald-500/15 text-emerald-400'}`}>{s.kind}</span>
+              <span className={`px-1.5 py-0.5 rounded text-[9px] font-medium ${s.kind === 'LOAD' ? 'bg-sky-500/15 text-sky-400' : 'bg-emerald-500/15 text-emerald-400'}`}>{s.kind}</span>
               <span className="text-foreground/90 flex-1">{loc(s.locationId)}</span>
               <span className="text-muted-foreground">{format(addDays(START, s.arriveDay), 'MMM d')}</span>
               <span className="text-foreground/70 font-mono text-[10px]">{s.ops.map(o => `${prod(o.productId)?.name} ${(o.qty / 1000).toFixed(0)}k→${o.compartmentId}`).join(' · ')}</span>
