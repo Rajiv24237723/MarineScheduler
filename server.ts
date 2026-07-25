@@ -1,264 +1,372 @@
 import express from 'express';
 import path from 'path';
+import { randomUUID } from 'crypto';
 import { createServer as createViteServer } from 'vite';
 import { db } from './src/db/index';
 import * as schema from './src/db/schema';
-import { eq, sql, and } from 'drizzle-orm';
+import { eq, and, desc, sql } from 'drizzle-orm';
 import { execSync } from 'child_process';
-import { runGreedyOptimization } from './src/lib/optimizer';
+import { seed } from './src/db/seed';
+import { solve } from './src/lib/mirp/engine';
+import { validate } from './src/lib/mirp/validate';
+import { InventoryModel } from './src/lib/mirp/inventory';
+import { EngineInput, EngineOptions, SolveResult } from './src/lib/mirp/types';
 
 const app = express();
 app.use(express.json());
 const PORT = 3000;
+const HORIZON_DAYS = 62;          // 01 Jul – 31 Aug 2026
+const START_DATE = '2026-07-01';
 
-// Run Optimizer (All-TypeScript Fallback Heuristic)
-app.post('/api/optimize', async (req, res) => {
-  try {
-    const stream = (req.query.stream as string) || 'POL';
-    
-    // 1. Fetch current state
-    const vessels = await db.select().from(schema.vessels).where(eq(schema.vessels.stream, stream));
-    const tanks = await db.select().from(schema.tanks).where(eq(schema.tanks.stream, stream));
-    const locs = await db.select().from(schema.locations).where(eq(schema.locations.stream, stream));
-    const movements = await db.select().from(schema.scheduleMovements).where(and(eq(schema.scheduleMovements.status, 'PLANNED'), eq(schema.scheduleMovements.stream, stream)));
-    
-    // 2. Run the actual TypeScript heuristic optimizer
-    const result = runGreedyOptimization(vessels, locs, tanks, movements);
-    
-    // Simulate slight processing time for realism
-    setTimeout(() => {
-      res.json({
-        status: 'success',
-        cost: result.cost,
-        breakdown: result.breakdown,
-        message: 'Optimization completed successfully.',
-        duals: result.duals
+// ---------------------------------------------------------------------------
+// Load a stream-scoped EngineInput from the database.
+// ---------------------------------------------------------------------------
+async function loadEngineInput(stream: string, options?: EngineOptions): Promise<EngineInput> {
+  const [products, locations, vessels, tanks, nodeFlows, berths, compatibility, planLines] = await Promise.all([
+    db.select().from(schema.products).where(eq(schema.products.stream, stream)),
+    db.select().from(schema.locations).where(eq(schema.locations.stream, stream)),
+    db.select().from(schema.vessels).where(eq(schema.vessels.stream, stream)),
+    db.select().from(schema.tanks).where(eq(schema.tanks.stream, stream)),
+    db.select().from(schema.nodeFlows).where(eq(schema.nodeFlows.stream, stream)),
+    db.select().from(schema.berths).where(eq(schema.berths.stream, stream)),
+    db.select().from(schema.productCompatibility).where(eq(schema.productCompatibility.stream, stream)),
+    db.select().from(schema.planLines).where(eq(schema.planLines.stream, stream)),
+  ]);
+  return {
+    stream, startDate: START_DATE, horizonDays: HORIZON_DAYS,
+    products: products as any, locations: locations as any, vessels: vessels as any,
+    tanks: tanks as any, nodeFlows: nodeFlows as any, berths: berths as any,
+    compatibility: compatibility as any, planLines: planLines as any, options,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Persist a solve result as a new (Active) schedule version, superseding prior.
+// ---------------------------------------------------------------------------
+async function persistVersion(stream: string, result: SolveResult, trigger: string, parentId: string | null, status: string = 'Active'): Promise<string> {
+  const existing = await db.select().from(schema.scheduleVersions).where(eq(schema.scheduleVersions.stream, stream));
+  const nextVersion = existing.reduce((m, v) => Math.max(m, v.version), 0) + 1;
+  // Only a published/Active plan supersedes the prior operating plan; drafts don't.
+  if (status === 'Active') await db.update(schema.scheduleVersions).set({ status: 'Superseded' })
+    .where(and(eq(schema.scheduleVersions.stream, stream), eq(schema.scheduleVersions.status, 'Active')));
+
+  const id = randomUUID();
+  await db.insert(schema.scheduleVersions).values({
+    id, stream, runId: randomUUID(), version: nextVersion, parentId, trigger,
+    status, objectiveCost: result.kpis.totalCost, achievable: result.achievable ? 1 : 0,
+    kpi: result.kpis as any, projection: result.projection as any, duals: result.duals as any,
+    payload: { voyages: result.voyages, charterRecommendations: result.charterRecommendations, unserved: result.unserved, validation: result.validation, message: result.message } as any,
+    createdAt: new Date().toISOString(),
+  });
+
+  // Normalized voyage tables (browsable/queryable). Logical voyage ids repeat
+  // across re-runs of a stream, so remap to per-version UUIDs on insert.
+  const idMap = new Map<string, string>();
+  for (const v of result.voyages) {
+    const vid = randomUUID(); idMap.set(v.id, vid);
+    await db.insert(schema.voyages).values({
+      id: vid, stream, versionId: id, vesselId: v.vesselId, vesselName: v.vesselName,
+      vesselClass: v.vesselClass, pool: v.pool, startDay: v.startDay, endDay: v.endDay,
+      cost: v.cost, costBreakdown: v.costBreakdown as any,
+    });
+    for (const s of v.stops) {
+      const stopId = randomUUID();
+      await db.insert(schema.voyageStops).values({
+        id: stopId, voyageId: vid, seq: s.seq, locationId: s.locationId,
+        arriveDay: s.arriveDay, departDay: s.departDay, kind: s.kind,
       });
-    }, 1500);
-
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Optimization failed' });
+      for (const op of s.ops) await db.insert(schema.voyageOps).values({
+        id: randomUUID(), voyageId: vid, stopId, op: op.op, productId: op.productId, qty: op.qty, compartmentId: op.compartmentId,
+      });
+    }
   }
-});
+  for (const r of result.charterRecommendations) await db.insert(schema.charterRecommendations).values({
+    id: randomUUID(), stream, versionId: id, voyageId: r.voyageId ? (idMap.get(r.voyageId) ?? null) : null, vesselClass: r.vesselClass, reason: r.reason, estCost: r.estCost,
+  });
+  return id;
+}
 
-// Free Open-Meteo Marine Weather API
-app.get('/api/weather', async (req, res) => {
-  try {
-    const lat = req.query.lat || '15.0';
-    const lng = req.query.lng || '72.0';
-    // Open-Meteo doesn't require an API key (fully free for demo)
-    const response = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&current_weather=true&windspeed_unit=kn`);
-    const data = await response.json();
-    res.json(data.current_weather);
-  } catch (e) {
-    res.status(500).json({ error: 'Weather fetch failed' });
-  }
-});
+async function activeVersion(stream: string) {
+  const rows = await db.select().from(schema.scheduleVersions)
+    .where(and(eq(schema.scheduleVersions.stream, stream), eq(schema.scheduleVersions.status, 'Active')));
+  return rows[0] ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// API
+// ---------------------------------------------------------------------------
 
 app.get('/api/dashboard', async (req, res) => {
   try {
     const stream = (req.query.stream as string) || 'POL';
-    const vessels = await db.select().from(schema.vessels).where(eq(schema.vessels.stream, stream));
-    const tanks = await db.select().from(schema.tanks).where(eq(schema.tanks.stream, stream));
-    const locs = await db.select().from(schema.locations).where(eq(schema.locations.stream, stream));
-    const prods = await db.select().from(schema.products).where(eq(schema.products.stream, stream));
-    const movements = await db.select().from(schema.scheduleMovements).where(eq(schema.scheduleMovements.stream, stream));
-    
+    const input = await loadEngineInput(stream);
+    const active = await activeVersion(stream);
+
+    // Baseline (exo-only) projection so views have data before the first optimize.
+    const prodName = new Map(input.products.map(p => [p.id, p.name]));
+    const locName = new Map(input.locations.map(l => [l.id, l.name]));
+    const baseline = new InventoryModel(input).projections(prodName, locName);
+
+    const versions = await db.select().from(schema.scheduleVersions).where(eq(schema.scheduleVersions.stream, stream));
+    const payload: any = active?.payload ?? null;
+
     res.json({
-      vessels,
-      tanks,
-      locations: locs,
-      products: prods,
-      movements,
-      kpis: {
-        totalCost: stream === 'POL' ? "₹845.2M" : (stream === 'CRUDE' ? "₹2125.0M" : "₹488.5M"),
-        demurrage: "₹12.2M",
-        utilization: "89%",
-        dryOuts: 0
-      }
+      stream,
+      vessels: input.vessels, tanks: input.tanks, locations: input.locations, products: input.products,
+      planLines: input.planLines, berths: input.berths, nodeFlows: input.nodeFlows, compatibility: input.compatibility,
+      projection: active?.projection ?? baseline,
+      voyages: payload?.voyages ?? [],
+      charterRecommendations: payload?.charterRecommendations ?? [],
+      unserved: payload?.unserved ?? [],
+      duals: active?.duals ?? [],
+      kpis: active?.kpi ?? baselineKpis(baseline),
+      validation: payload?.validation ?? null,
+      activeVersionId: active?.id ?? null,
+      versions: versions.map(v => ({ id: v.id, version: v.version, status: v.status, trigger: v.trigger, objectiveCost: v.objectiveCost, achievable: v.achievable, createdAt: v.createdAt })).sort((a, b) => b.version - a.version),
     });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Failed to fetch dashboard data' });
-  }
+  } catch (e) { console.error(e); res.status(500).json({ error: 'dashboard failed', message: (e as Error).message }); }
 });
 
+function baselineKpis(projection: any[]) {
+  return {
+    totalCost: 0, demurrage: 0, utilizationPct: 0,
+    dryOutDays: projection.filter(p => p.firstDryOutDay !== null).length,
+    tankTopDays: projection.filter(p => p.firstTankTopDay !== null).length,
+    voyageCount: 0, charterRecommendationCount: 0, demandServedPct: 0,
+  };
+}
+
+app.post('/api/optimize', async (req, res) => {
+  try {
+    const stream = (req.query.stream as string) || 'POL';
+    const options: EngineOptions = req.body?.options ?? {};
+    const input = await loadEngineInput(stream, options);
+    const result = await solve(input);
+    const versionId = await persistVersion(stream, result, 'reoptimize', (await activeVersion(stream))?.id ?? null);
+    res.json({ ...result, versionId });
+  } catch (e) { console.error(e); res.status(500).json({ error: 'optimize failed', message: (e as Error).message }); }
+});
+
+const diffVs = (result: SolveResult, parentKpi: any) => parentKpi ? {
+  costDelta: result.kpis.totalCost - parentKpi.totalCost,
+  voyageDelta: result.kpis.voyageCount - parentKpi.voyageCount,
+  charterDelta: result.kpis.charterRecommendationCount - parentKpi.charterRecommendationCount,
+  servedDelta: result.kpis.demandServedPct - parentKpi.demandServedPct,
+} : null;
+
+// Does the CURRENT active plan still hold under a scenario's input changes?
+// Re-projects the active plan's committed voyages against the modified inputs — no re-solve.
+app.post('/api/scenario/check', async (req, res) => {
+  try {
+    const stream = (req.query.stream as string) || 'POL';
+    const options: EngineOptions = req.body?.options ?? {};
+    const active = await activeVersion(stream);
+    const input = await loadEngineInput(stream, options);
+    if (!active?.payload) return res.json({ hasPlan: false, holds: false, breaches: [] });
+    const voyages = (active.payload as any).voyages ?? [];
+    const v = validate(input, voyages);
+    res.json({ hasPlan: true, activeVersion: active.version, holds: v.ok, breaches: v.breaches });
+  } catch (e) { console.error(e); res.status(500).json({ error: 'scenario check failed', message: (e as Error).message }); }
+});
+
+// Simulate a recovery under the scenario as a DRAFT (rolling-horizon, freezing
+// in-progress voyages). The operating plan is left untouched until published.
+app.post('/api/scenario/apply', async (req, res) => {
+  try {
+    const stream = (req.query.stream as string) || 'POL';
+    const name = (req.body?.name as string) || 'scenario';
+    const options: EngineOptions = { ...(req.body?.options ?? {}) };
+    const parent = await activeVersion(stream);
+    const baseVoy: any[] = (parent?.payload as any)?.voyages ?? [];
+    const asOf = Math.max(0, options.asOfDay ?? 0);
+
+    // A baseline voyage is invalidated by the disruption if it rides an off-hire
+    // vessel or calls a closed port during the closure window.
+    const off = new Set(options.excludeVessels ?? []);
+    const isInvalidated = (v: any) => {
+      if (v.vesselId && off.has(v.vesselId)) return true;
+      for (const o of options.tankOutages ?? []) if (v.stops?.some((s: any) => s.locationId === o.locationId && s.arriveDay >= o.fromDay && s.arriveDay <= o.toDay)) return true;
+      return false;
+    };
+
+    let frozen: any[];
+    if (options.mode === 'minimal-edit') {
+      // Destroy/repair (Model R): keep every baseline voyage except the ones the
+      // disruption forces out; the greedy then repairs only the residual gaps.
+      frozen = baseVoy.filter(v => v.startDay < asOf || !isInvalidated(v));
+    } else {
+      const freezeUntil = options.mode === 'minimal-change' ? asOf + 14 : asOf;
+      frozen = baseVoy.filter(v => v.startDay < freezeUntil);
+    }
+    options.frozenVoyages = frozen as any;
+    options.asOfDay = asOf;
+
+    // Feasibility of the pre-existing operating plan under the change (no re-solve).
+    let currentPlanHolds = true; let breaches: string[] = [];
+    if (parent?.payload) { const chk = validate(await loadEngineInput(stream, { ...options, frozenVoyages: undefined }), baseVoy); currentPlanHolds = chk.ok; breaches = chk.breaches; }
+
+    const result = await solve(await loadEngineInput(stream, options));
+    const versionId = await persistVersion(stream, result, `scenario:${name}`, parent?.id ?? null, 'Draft');
+
+    const frozenIds = new Set(frozen.map(v => v.id));
+    const added = result.voyages.filter(v => !frozenIds.has(v.id));
+    const removedBaseline = baseVoy.filter(v => !frozenIds.has(v.id)); // baseline voyages dropped
+    const brief = (v: any) => ({
+      vesselName: v.vesselName, vesselClass: v.vesselClass, pool: v.pool,
+      from: v.stops.find((s: any) => s.kind === 'LOAD')?.locationId ?? null,
+      to: v.stops.filter((s: any) => s.kind === 'DISCHARGE').slice(-1)[0]?.locationId ?? null,
+      cost: v.cost,
+    });
+    const changeSet = {
+      asOfDay: asOf, mode: options.mode ?? 'cost-optimal',
+      frozen: frozen.length, added: added.length, removed: removedBaseline.length,
+      replanned: Math.max(0, baseVoy.length - frozen.length),
+      spotAdded: added.filter(v => v.pool === 'SPOT').length,
+      addedVoyages: added.slice(0, 10).map(brief),
+      removedVoyages: removedBaseline.slice(0, 10).map(brief),
+    };
+    res.json({ ...result, versionId, currentPlanHolds, breaches, diff: diffVs(result, parent?.kpi ?? null), changeSet });
+  } catch (e) { console.error(e); res.status(500).json({ error: 'scenario apply failed', message: (e as Error).message }); }
+});
+
+// Publish a version (draft or superseded) as the operating plan.
+async function makeActive(id: string, res: any) {
+  const rows = await db.select().from(schema.scheduleVersions).where(eq(schema.scheduleVersions.id, id));
+  if (!rows[0]) return res.status(404).json({ error: 'not found' });
+  await db.update(schema.scheduleVersions).set({ status: 'Superseded' }).where(and(eq(schema.scheduleVersions.stream, rows[0].stream), eq(schema.scheduleVersions.status, 'Active')));
+  await db.update(schema.scheduleVersions).set({ status: 'Active' }).where(eq(schema.scheduleVersions.id, id));
+  res.json({ ok: true });
+}
+app.post('/api/versions/:id/publish', (req, res) => makeActive(req.params.id, res));
+app.post('/api/versions/:id/rollback', (req, res) => makeActive(req.params.id, res));
+
+// Discard a non-active version and its voyages.
+app.delete('/api/versions/:id', async (req, res) => {
+  try {
+    const rows = await db.select().from(schema.scheduleVersions).where(eq(schema.scheduleVersions.id, req.params.id));
+    if (!rows[0]) return res.status(404).json({ error: 'not found' });
+    if (rows[0].status === 'Active') return res.status(400).json({ error: 'cannot discard the active plan' });
+    const voys = await db.select().from(schema.voyages).where(eq(schema.voyages.versionId, req.params.id));
+    for (const v of voys) { await db.delete(schema.voyageOps).where(eq(schema.voyageOps.voyageId, v.id)); await db.delete(schema.voyageStops).where(eq(schema.voyageStops.voyageId, v.id)); }
+    await db.delete(schema.voyages).where(eq(schema.voyages.versionId, req.params.id));
+    await db.delete(schema.charterRecommendations).where(eq(schema.charterRecommendations.versionId, req.params.id));
+    await db.delete(schema.scheduleVersions).where(eq(schema.scheduleVersions.id, req.params.id));
+    res.json({ ok: true });
+  } catch (e) { console.error(e); res.status(500).json({ error: 'discard failed', message: (e as Error).message }); }
+});
+
+// Legacy quick-disruption endpoint (maps singular fields to array options).
+app.post('/api/replan', async (req, res) => {
+  try {
+    const stream = (req.query.stream as string) || 'POL';
+    const { trigger, emergencyDemand, tankOutage, excludeVessels } = req.body ?? {};
+    const parent = await activeVersion(stream);
+    const options: EngineOptions = {
+      emergencyDemands: emergencyDemand ? [emergencyDemand] : undefined,
+      tankOutages: tankOutage ? [tankOutage] : undefined,
+      excludeVessels,
+    };
+    const result = await solve(await loadEngineInput(stream, options));
+    const versionId = await persistVersion(stream, result, `disruption:${trigger ?? 'manual'}`, parent?.id ?? null);
+    res.json({ ...result, versionId, diff: diffVs(result, parent?.kpi ?? null) });
+  } catch (e) { console.error(e); res.status(500).json({ error: 'replan failed', message: (e as Error).message }); }
+});
+
+app.get('/api/versions', async (req, res) => {
+  const stream = (req.query.stream as string) || 'POL';
+  const rows = await db.select().from(schema.scheduleVersions).where(eq(schema.scheduleVersions.stream, stream));
+  res.json(rows.map(v => ({ id: v.id, version: v.version, status: v.status, trigger: v.trigger, objectiveCost: v.objectiveCost, achievable: v.achievable, createdAt: v.createdAt, kpi: v.kpi })).sort((a, b) => b.version - a.version));
+});
+
+app.get('/api/versions/compare', async (req, res) => {
+  const a = await db.select().from(schema.scheduleVersions).where(eq(schema.scheduleVersions.id, req.query.a as string));
+  const b = await db.select().from(schema.scheduleVersions).where(eq(schema.scheduleVersions.id, req.query.b as string));
+  if (!a[0] || !b[0]) return res.status(404).json({ error: 'version not found' });
+  const ka: any = a[0].kpi, kb: any = b[0].kpi;
+  res.json({
+    a: { version: a[0].version, kpi: ka }, b: { version: b[0].version, kpi: kb },
+    delta: { costDelta: kb.totalCost - ka.totalCost, voyageDelta: kb.voyageCount - ka.voyageCount, servedDelta: kb.demandServedPct - ka.demandServedPct, charterDelta: kb.charterRecommendationCount - ka.charterRecommendationCount },
+  });
+});
+
+app.get('/api/versions/:id', async (req, res) => {
+  const rows = await db.select().from(schema.scheduleVersions).where(eq(schema.scheduleVersions.id, req.params.id));
+  if (!rows[0]) return res.status(404).json({ error: 'not found' });
+  res.json(rows[0]);
+});
+
+// Generic master-data CRUD for the editable tables.
+const MASTER: Record<string, any> = {
+  products: schema.products, locations: schema.locations, vessels: schema.vessels,
+  tanks: schema.tanks, nodeFlows: schema.nodeFlows, planLines: schema.planLines,
+  berths: schema.berths, productCompatibility: schema.productCompatibility,
+};
+app.post('/api/master/:table', async (req, res) => {
+  const t = MASTER[req.params.table]; if (!t) return res.status(404).json({ error: 'unknown table' });
+  const row = { id: req.body.id ?? randomUUID(), ...req.body };
+  await db.insert(t).values(row); res.json(row);
+});
+app.put('/api/master/:table/:id', async (req, res) => {
+  const t = MASTER[req.params.table]; if (!t) return res.status(404).json({ error: 'unknown table' });
+  await db.update(t).set(req.body).where(eq(t.id, req.params.id)); res.json({ ok: true });
+});
+app.delete('/api/master/:table/:id', async (req, res) => {
+  const t = MASTER[req.params.table]; if (!t) return res.status(404).json({ error: 'unknown table' });
+  await db.delete(t).where(eq(t.id, req.params.id)); res.json({ ok: true });
+});
+// Bulk import (CSV/plan upload). Optionally replace all rows for a stream first.
+app.post('/api/master/:table/bulk', async (req, res) => {
+  const t = MASTER[req.params.table]; if (!t) return res.status(404).json({ error: 'unknown table' });
+  try {
+    const rows: any[] = req.body?.rows ?? [];
+    const replaceStream: string | undefined = req.body?.replaceStream;
+    if (replaceStream) await db.delete(t).where(eq(t.stream, replaceStream));
+    const withIds = rows.map(r => ({ id: r.id ?? randomUUID(), ...r }));
+    if (withIds.length) await db.insert(t).values(withIds);
+    res.json({ ok: true, inserted: withIds.length });
+  } catch (e) { console.error(e); res.status(500).json({ error: 'bulk import failed', message: (e as Error).message }); }
+});
+// Reset all data back to the seeded demo network.
+app.post('/api/admin/reseed', async (_req, res) => {
+  try {
+    const tables = [schema.charterRecommendations, schema.voyageOps, schema.voyageStops, schema.voyages, schema.scheduleVersions, schema.planLines, schema.nodeFlows, schema.berths, schema.productCompatibility, schema.tanks, schema.vessels, schema.locations, schema.products];
+    for (const t of tables) await db.delete(t);
+    await seed(db);
+    res.json({ ok: true });
+  } catch (e) { console.error(e); res.status(500).json({ error: 'reseed failed', message: (e as Error).message }); }
+});
+
+// Free Open-Meteo marine weather (no key).
+app.get('/api/weather', async (req, res) => {
+  try {
+    const lat = req.query.lat || '15.0', lng = req.query.lng || '72.0';
+    const r = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&current_weather=true&windspeed_unit=kn`);
+    const d = await r.json(); res.json(d.current_weather);
+  } catch { res.status(500).json({ error: 'weather fetch failed' }); }
+});
+
+// ---------------------------------------------------------------------------
 async function startServer() {
-  // Run migrations
   try {
     console.log('Pushing database schema...');
-    execSync('npx drizzle-kit push', { stdio: 'inherit' });
-    console.log('Schema pushed successfully.');
-    
-    // Seed DB if empty
+    execSync('npx drizzle-kit push --force', { stdio: 'inherit' });
     const locCount = await db.select({ count: sql`count(*)` }).from(schema.locations);
-    if (locCount[0].count === 0) {
-      console.log('Seeding initial data...');
-      
-      const prods = [
-        { id: 'p1', stream: 'POL', name: 'HSD', type: 'POL', color: '#f59e0b' },
-        { id: 'p2', stream: 'POL', name: 'MS', type: 'POL', color: '#ef4444' },
-        { id: 'p3', stream: 'POL', name: 'ATF', type: 'POL', color: '#3b82f6' },
-        { id: 'p4', stream: 'POL', name: 'SKO', type: 'POL', color: '#8b5cf6' },
-        { id: 'p5', stream: 'CRUDE', name: 'Arab Light', type: 'CRUDE', color: '#10b981' },
-        { id: 'p6', stream: 'CRUDE', name: 'Basrah Heavy', type: 'CRUDE', color: '#059669' },
-        { id: 'p7', stream: 'CRUDE', name: 'Urals', type: 'CRUDE', color: '#047857' },
-        { id: 'p8', stream: 'LNG', name: 'LNG', type: 'LNG', color: '#ec4899' },
-      ];
-      await db.insert(schema.products).values(prods);
-
-      const locs = [
-        // POL Locations (Refineries and Terminals)
-        { id: 'l_koyali', stream: 'POL', name: 'Gujarat Refinery (Koyali)', type: 'REFINERY', lat: 22.3667, lng: 73.1500 },
-        { id: 'l_panipat', stream: 'POL', name: 'Panipat Refinery', type: 'REFINERY', lat: 29.4500, lng: 76.8500 },
-        { id: 'l_haldia_ref', stream: 'POL', name: 'Haldia Refinery', type: 'REFINERY', lat: 22.0333, lng: 88.0667 },
-        { id: 'l_paradip_ref', stream: 'POL', name: 'Paradip Refinery', type: 'REFINERY', lat: 20.2961, lng: 86.6115 },
-        { id: 'l_kandla', stream: 'POL', name: 'Kandla Terminal', type: 'COASTAL_TERMINAL', lat: 23.0333, lng: 70.2167 },
-        { id: 'l_chennai', stream: 'POL', name: 'Chennai Terminal (Ennore)', type: 'COASTAL_TERMINAL', lat: 13.2500, lng: 80.3333 },
-        { id: 'l_kochi', stream: 'POL', name: 'Kochi Terminal', type: 'COASTAL_TERMINAL', lat: 9.9667, lng: 76.2667 },
-        { id: 'l_mangalore', stream: 'POL', name: 'Mangalore Terminal', type: 'COASTAL_TERMINAL', lat: 12.9141, lng: 74.8560 },
-        
-        // CRUDE Locations
-        { id: 'l_paradip_spm', stream: 'CRUDE', name: 'Paradip SPM', type: 'SOURCE', lat: 20.2500, lng: 86.7000 },
-        { id: 'l_vadinar_spm', stream: 'CRUDE', name: 'Vadinar SPM', type: 'SOURCE', lat: 22.4167, lng: 69.6667 },
-        { id: 'l_ras_tanura', stream: 'CRUDE', name: 'Ras Tanura (KSA)', type: 'SOURCE', lat: 26.6500, lng: 50.1500 },
-        { id: 'l_basrah', stream: 'CRUDE', name: 'Basrah Oil Terminal', type: 'SOURCE', lat: 29.6833, lng: 48.8000 },
-        { id: 'l_paradip_crude', stream: 'CRUDE', name: 'Paradip Crude Farm', type: 'CRUDE_STORAGE', lat: 20.2800, lng: 86.6200 },
-        { id: 'l_mundra_crude', stream: 'CRUDE', name: 'Mundra Crude Farm', type: 'CRUDE_STORAGE', lat: 22.7500, lng: 69.7000 },
-        
-        // LNG Locations
-        { id: 'l_dahej', stream: 'LNG', name: 'Dahej LNG Terminal', type: 'LNG_TERMINAL', lat: 21.7115, lng: 72.5852 },
-        { id: 'l_ennore', stream: 'LNG', name: 'Ennore LNG Terminal', type: 'LNG_TERMINAL', lat: 13.2550, lng: 80.3300 },
-        { id: 'l_qatar', stream: 'LNG', name: 'Ras Laffan (Qatar)', type: 'SOURCE', lat: 25.9080, lng: 51.5480 },
-        { id: 'l_australia', stream: 'LNG', name: 'Gorgon (Australia)', type: 'SOURCE', lat: -20.8000, lng: 115.4500 },
-      ];
-      await db.insert(schema.locations).values(locs);
-
-      const vs = [
-        // POL Fleet
-        // POL Fleet
-        { id: 'v_pol1', stream: 'POL', name: 'MT Swarna', class: 'MR', dwt: 45000, charterType: 'TC', speed: 12.5, charterCost: 15000, compartments: [{id: 'C1', cap: 15000}, {id: 'C2', cap: 15000}, {id: 'C3', cap: 15000}] },
-        { id: 'v_pol2', stream: 'POL', name: 'MT Godavari', class: 'Handysize', dwt: 25000, charterType: 'VOYAGE', speed: 11.0, charterCost: 20, compartments: [{id: 'C1', cap: 12500}, {id: 'C2', cap: 12500}] },
-        { id: 'v_pol3', stream: 'POL', name: 'MT Ganga', class: 'MR', dwt: 50000, charterType: 'TC', speed: 13.5, charterCost: 18000, compartments: [{id: 'C1', cap: 20000}, {id: 'C2', cap: 15000}, {id: 'C3', cap: 15000}] },
-        { id: 'v_pol4', stream: 'POL', name: 'MT Kaveri', class: 'Handysize', dwt: 30000, charterType: 'TC', speed: 12.0, charterCost: 12000, compartments: [{id: 'C1', cap: 10000}, {id: 'C2', cap: 10000}, {id: 'C3', cap: 10000}] },
-        { id: 'v_pol5', stream: 'POL', name: 'MT Narmada', class: 'LR1', dwt: 75000, charterType: 'VOYAGE', speed: 14.0, charterCost: 25, compartments: [{id: 'C1', cap: 25000}, {id: 'C2', cap: 25000}, {id: 'C3', cap: 25000}] },
-        
-        // Crude Fleet
-        { id: 'v_cru1', stream: 'CRUDE', name: 'MT Kutch', class: 'VLCC', dwt: 300000, charterType: 'TC', speed: 14.5, charterCost: 35000, compartments: [{id: 'C1', cap: 100000}, {id: 'C2', cap: 100000}, {id: 'C3', cap: 100000}] },
-        { id: 'v_cru2', stream: 'CRUDE', name: 'MT Saurashtra', class: 'Suezmax', dwt: 150000, charterType: 'TC', speed: 14.0, charterCost: 28000, compartments: [{id: 'C1', cap: 75000}, {id: 'C2', cap: 75000}] },
-        { id: 'v_cru3', stream: 'CRUDE', name: 'MT Ocean King', class: 'Aframax', dwt: 110000, charterType: 'VOYAGE', speed: 13.5, charterCost: 15, compartments: [{id: 'C1', cap: 55000}, {id: 'C2', cap: 55000}] },
-        
-        // LNG Fleet
-        { id: 'v_lng1', stream: 'LNG', name: 'LNG Bharat', class: 'LNGC', dwt: 90000, charterType: 'TC', speed: 18.0, charterCost: 65000, compartments: [{id: 'C1', cap: 45000}, {id: 'C2', cap: 45000}] },
-        { id: 'v_lng2', stream: 'LNG', name: 'LNG Prachi', class: 'LNGC', dwt: 85000, charterType: 'TC', speed: 17.5, charterCost: 62000, compartments: [{id: 'C1', cap: 42500}, {id: 'C2', cap: 42500}] },
-      ];
-      await db.insert(schema.vessels).values(vs);
-
-      const tks = [
-        // POL Tanks
-        { id: 't_p1', stream: 'POL', locationId: 'l_koyali', productId: 'p1', capacity: 50000, minStock: 5000, currentStock: 45000, name: 'TK-HSD-01' },
-        { id: 't_p2', stream: 'POL', locationId: 'l_koyali', productId: 'p2', capacity: 40000, minStock: 4000, currentStock: 25000, name: 'TK-MS-01' },
-        { id: 't_p3', stream: 'POL', locationId: 'l_kandla', productId: 'p1', capacity: 60000, minStock: 8000, currentStock: 12000, name: 'TK-HSD-101' },
-        { id: 't_p4', stream: 'POL', locationId: 'l_kandla', productId: 'p2', capacity: 50000, minStock: 6000, currentStock: 8000, name: 'TK-MS-101' },
-        { id: 't_p5', stream: 'POL', locationId: 'l_paradip_ref', productId: 'p1', capacity: 100000, minStock: 15000, currentStock: 85000, name: 'TK-HSD-P1' },
-        { id: 't_p6', stream: 'POL', locationId: 'l_chennai', productId: 'p1', capacity: 45000, minStock: 5000, currentStock: 9000, name: 'TK-HSD-C1' },
-        { id: 't_p7', stream: 'POL', locationId: 'l_chennai', productId: 'p3', capacity: 30000, minStock: 4000, currentStock: 28000, name: 'TK-ATF-C2' },
-        
-        // Crude Tanks
-        { id: 't_c1', stream: 'CRUDE', locationId: 'l_paradip_crude', productId: 'p5', capacity: 300000, minStock: 50000, currentStock: 120000, name: 'TK-CR-P1' },
-        { id: 't_c2', stream: 'CRUDE', locationId: 'l_paradip_crude', productId: 'p6', capacity: 300000, minStock: 50000, currentStock: 80000, name: 'TK-CR-P2' },
-        { id: 't_c3', stream: 'CRUDE', locationId: 'l_mundra_crude', productId: 'p5', capacity: 250000, minStock: 40000, currentStock: 190000, name: 'TK-CR-M1' },
-        
-        // LNG Tanks
-        { id: 't_l1', stream: 'LNG', locationId: 'l_dahej', productId: 'p8', capacity: 200000, minStock: 20000, currentStock: 85000, name: 'TK-LNG-D1' },
-        { id: 't_l2', stream: 'LNG', locationId: 'l_ennore', productId: 'p8', capacity: 180000, minStock: 15000, currentStock: 45000, name: 'TK-LNG-E1' },
-      ];
-      await db.insert(schema.tanks).values(tks);
-
-      const runId = 'run_base_1';
-      const svId1 = 'sv1';
-      const svId2 = 'sv2';
-      const svId3 = 'sv3';
-      
-      await db.insert(schema.scheduleVersions).values([
-        { id: svId1, stream: 'POL', runId, version: 1, trigger: 'initial', status: 'Active', objectiveCost: 4500000, createdAt: new Date().toISOString() },
-        { id: svId2, stream: 'CRUDE', runId, version: 1, trigger: 'initial', status: 'Active', objectiveCost: 125000000, createdAt: new Date().toISOString() },
-        { id: svId3, stream: 'LNG', runId, version: 1, trigger: 'initial', status: 'Active', objectiveCost: 88500000, createdAt: new Date().toISOString() }
-      ]);
-
-      const now = new Date();
-      const in1Day = new Date(now.getTime() + 1 * 24 * 60 * 60 * 1000);
-      const in2Days = new Date(now.getTime() + 2 * 24 * 60 * 60 * 1000);
-      const in3Days = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
-      const in5Days = new Date(now.getTime() + 5 * 24 * 60 * 60 * 1000);
-      const in7Days = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
-      const in10Days = new Date(now.getTime() + 10 * 24 * 60 * 60 * 1000);
-
-      await db.insert(schema.scheduleMovements).values([
-        // POL Movements
-        {
-          id: 'm_p1', stream: 'POL', scheduleVersionId: svId1, vesselId: 'v_pol1', productId: 'p1', sourceId: 'l_koyali', destId: 'l_kandla',
-          qty: 25000, startDate: now.toISOString(), endDate: in2Days.toISOString(), status: 'IN_TRANSIT'
-        },
-        {
-          id: 'm_p2', stream: 'POL', scheduleVersionId: svId1, vesselId: 'v_pol2', productId: 'p2', sourceId: 'l_koyali', destId: 'l_kandla',
-          qty: 15000, startDate: in1Day.toISOString(), endDate: in3Days.toISOString(), status: 'PLANNED'
-        },
-        {
-          id: 'm_p3', stream: 'POL', scheduleVersionId: svId1, vesselId: 'v_pol3', productId: 'p1', sourceId: 'l_paradip_ref', destId: 'l_chennai',
-          qty: 40000, startDate: in2Days.toISOString(), endDate: in5Days.toISOString(), status: 'PLANNED'
-        },
-        {
-          id: 'm_p4', stream: 'POL', scheduleVersionId: svId1, vesselId: 'v_pol4', productId: 'p3', sourceId: 'l_paradip_ref', destId: 'l_chennai',
-          qty: 20000, startDate: in3Days.toISOString(), endDate: in7Days.toISOString(), status: 'PLANNED'
-        },
-        
-        // Crude Movements
-        {
-          id: 'm_c1', stream: 'CRUDE', scheduleVersionId: svId2, vesselId: 'v_cru1', productId: 'p5', sourceId: 'l_ras_tanura', destId: 'l_paradip_spm',
-          qty: 280000, startDate: now.toISOString(), endDate: in7Days.toISOString(), status: 'IN_TRANSIT'
-        },
-        {
-          id: 'm_c2', stream: 'CRUDE', scheduleVersionId: svId2, vesselId: 'v_cru2', productId: 'p6', sourceId: 'l_basrah', destId: 'l_vadinar_spm',
-          qty: 140000, startDate: in2Days.toISOString(), endDate: in5Days.toISOString(), status: 'PLANNED'
-        },
-        
-        // LNG Movements
-        {
-          id: 'm_l1', stream: 'LNG', scheduleVersionId: svId3, vesselId: 'v_lng1', productId: 'p8', sourceId: 'l_qatar', destId: 'l_dahej',
-          qty: 85000, startDate: in1Day.toISOString(), endDate: in5Days.toISOString(), status: 'IN_TRANSIT'
-        },
-        {
-          id: 'm_l2', stream: 'LNG', scheduleVersionId: svId3, vesselId: 'v_lng2', productId: 'p8', sourceId: 'l_australia', destId: 'l_ennore',
-          qty: 80000, startDate: now.toISOString(), endDate: in10Days.toISOString(), status: 'IN_TRANSIT'
-        }
-      ]);
-
-      console.log('Database seeded with enriched data.');
+    if ((locCount[0] as any).count === 0) {
+      console.log('Seeding Jul–Aug 2026 monthly plan...');
+      await seed(db);
+      console.log('Seed complete.');
     }
-  } catch (e) {
-    console.error('Migration/Seed Error:', e);
-  }
+  } catch (e) { console.error('Migration/Seed error:', e); }
 
-  // Vite middleware for development
   if (process.env.NODE_ENV !== 'production') {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'spa',
-    });
+    const vite = await createViteServer({ server: { middlewareMode: true }, appType: 'spa' });
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
+    app.get('*', (_req, res) => res.sendFile(path.join(distPath, 'index.html')));
   }
-
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running on port ${PORT}`);
-  });
+  app.listen(PORT, '0.0.0.0', () => console.log(`Server running on port ${PORT}`));
 }
 
 startServer();

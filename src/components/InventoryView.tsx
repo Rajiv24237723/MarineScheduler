@@ -1,156 +1,84 @@
 import { useState, useMemo } from 'react';
-import { DashboardData } from '../types';
+import { DashboardData, Tank } from '../types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Modal } from '@/components/ui/modal';
+import { TankDetail } from './TankDetail';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
-import { TrendingUp, Filter } from 'lucide-react';
+import { format, addDays } from 'date-fns';
+
+const START = new Date('2026-07-01T00:00:00Z');
 
 export default function InventoryView({ data }: { data: DashboardData }) {
-  const [selectedLocId, setSelectedLocId] = useState<string>('l_koyali');
-  const [selectedProdId, setSelectedProdId] = useState<string>('p1');
+  const projections = data.projection ?? [];
+  const [key, setKey] = useState<string>(projections[0] ? `${projections[0].locationId}|${projections[0].productId}` : '');
+  const [openTank, setOpenTank] = useState<Tank | null>(null);
+  const tankFor = (loc: string, pid: string) => data.tanks.find(t => t.locationId === loc && t.productId === pid) ?? null;
+  const sel = projections.find(p => `${p.locationId}|${p.productId}` === key) ?? projections[0];
 
-  // Generate 30 days of inventory projection based on current stock and dummy movements
-  const chartData = useMemo(() => {
-    // Find tank for selected location and product
-    const tank = data.tanks.find(t => t.locationId === selectedLocId && t.productId === selectedProdId);
-    
-    if (!tank) return [];
+  const chartData = useMemo(() => (sel?.series ?? []).map(s => ({
+    date: format(addDays(START, s.day), 'MMM d'), stock: s.stock,
+  })), [sel]);
 
-    let currentStock = tank.currentStock;
-    const capacity = tank.capacity;
-    const minStock = tank.minStock;
-    
-    // Simulate daily consumption or production
-    // Refinery: Produces. Terminal: Consumes.
-    const loc = data.locations.find(l => l.id === selectedLocId);
-    const isProducer = loc?.type === 'REFINERY' || loc?.type === 'SOURCE';
-    const dailyChange = isProducer ? 2000 : -1500; // Base daily change
+  if (!sel) return <div className="text-sm text-muted-foreground">No inventory nodes for this stream.</div>;
 
-    const points = [];
-    const now = new Date();
-    
-    for (let i = 0; i < 30; i++) {
-      const date = new Date(now.getTime() + i * 24 * 60 * 60 * 1000);
-      
-      // Simulate a ship arriving and changing stock abruptly
-      // E.g. every 7 days
-      if (i > 0 && i % 7 === 0) {
-         if (isProducer) {
-             currentStock -= 25000; // Ship loads
-         } else {
-             currentStock += 25000; // Ship discharges
-         }
-      }
-
-      currentStock += dailyChange;
-      
-      // Clamp stock just to be safe it doesn't go crazy
-      if (currentStock > capacity * 1.2) currentStock = capacity;
-      if (currentStock < 0) currentStock = 0;
-
-      points.push({
-        date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-        stock: currentStock,
-        capacity: capacity,
-        min: minStock
-      });
-    }
-
-    return points;
-  }, [data.tanks, data.locations, selectedLocId, selectedProdId]);
-
-  const selectedLocName = data.locations.find(l => l.id === selectedLocId)?.name || 'Unknown Location';
-  const selectedProdColor = data.products.find(p => p.id === selectedProdId)?.color || '#22d3ee';
+  const atRisk = projections.filter(p => p.firstDryOutDay !== null || p.firstTankTopDay !== null);
 
   return (
-    <div className="space-y-6 flex flex-col flex-1 min-h-0">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center justify-between bg-card/50 p-4 rounded-lg border border-border/80">
-        <div className="flex items-center gap-4">
-          <h3 className="text-lg font-semibold text-foreground flex items-center gap-2">
-            <TrendingUp className="w-5 h-5 text-indigo-400" />
-            Inventory Forecast (30 Days)
-          </h3>
-        </div>
-        <div className="flex flex-wrap items-center gap-4">
-          <div className="flex items-center gap-2 text-sm">
-            <Filter className="w-4 h-4 text-muted-foreground/80" />
-            <select 
-              value={selectedLocId} 
-              onChange={(e) => setSelectedLocId(e.target.value)}
-              className="bg-background text-foreground/90 border border-border rounded-lg px-3 py-1.5 text-xs font-medium focus:outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/50"
-            >
-              {data.locations.filter(l => ['REFINERY', 'COASTAL_TERMINAL', 'CRUDE_STORAGE', 'LNG_TERMINAL'].includes(l.type)).map(loc => (
-                <option key={loc.id} value={loc.id}>{loc.name}</option>
-              ))}
-            </select>
-          </div>
-          <div className="flex items-center gap-2 text-sm">
-            <select 
-              value={selectedProdId} 
-              onChange={(e) => setSelectedProdId(e.target.value)}
-              className="bg-background text-foreground/90 border border-border rounded-lg px-3 py-1.5 text-xs font-medium focus:outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/50"
-            >
-              {data.products.map(prod => (
-                <option key={prod.id} value={prod.id}>{prod.name}</option>
-              ))}
-            </select>
-          </div>
-        </div>
+    <div className="space-y-5">
+      <div className="flex items-center justify-between">
+        <h3 className="text-lg font-semibold text-foreground">Network Inventory Forecast</h3>
+        <select value={key} onChange={e => setKey(e.target.value)} className="bg-card/50 text-sm rounded-lg px-3 py-1.5 border border-border/80 text-foreground/90">
+          {projections.map(p => <option key={`${p.locationId}|${p.productId}`} value={`${p.locationId}|${p.productId}`}>{p.locationName} — {p.productName}</option>)}
+        </select>
       </div>
 
-      <div className="flex-1 min-h-[400px]">
-        {chartData.length > 0 ? (
-          <Card className="bg-card/50 border-border/80 rounded-lg h-full flex flex-col">
-            <CardHeader className="border-b border-border/60 pb-4 bg-background/50 rounded-t-xl">
-              <CardTitle className="text-sm font-semibold text-muted-foreground">
-                Projected Stock Profile: <span className="text-foreground">{selectedLocName}</span>
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="flex-1 p-6">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#333" vertical={false} />
-                  <XAxis 
-                    dataKey="date" 
-                    stroke="#888" 
-                    fontSize={12} 
-                    tickMargin={15}
-                  />
-                  <YAxis 
-                    stroke="#888" 
-                    fontSize={12} 
-                    tickFormatter={(val) => `${(val/1000).toFixed(0)}k`}
-                  />
-                  <Tooltip 
-                    contentStyle={{ backgroundColor: 'rgba(0,0,0,0.8)', borderColor: 'rgba(255,255,255,0.1)', backdropFilter: 'blur(8px)' }}
-                    itemStyle={{ color: selectedProdColor, fontFamily: 'monospace' }}
-                    labelStyle={{ color: '#888', marginBottom: '8px' }}
-                    formatter={(value: number) => [`${value.toLocaleString()} MT`, 'Inventory']}
-                  />
-                  
-                  {/* Safe Fill Limit / Capacity */}
-                  <ReferenceLine y={chartData[0]?.capacity * 0.95} stroke="#f59e0b" strokeDasharray="3 3" label={{ position: 'top', value: 'Tank Top Limit', fill: '#f59e0b', fontSize: 10 }} />
-                  
-                  {/* Min Stock Limit */}
-                  <ReferenceLine y={chartData[0]?.min} stroke="#ef4444" strokeDasharray="3 3" label={{ position: 'top', value: 'Dry-out Limit', fill: '#ef4444', fontSize: 10 }} />
-
-                  <Line 
-                    type="stepAfter" 
-                    dataKey="stock" 
-                    stroke={selectedProdColor} 
-                    strokeWidth={3} 
-                    dot={false}
-                    activeDot={{ r: 6, fill: selectedProdColor, stroke: '#000', strokeWidth: 2 }}
-                  />
-                </LineChart>
-              </ResponsiveContainer>
-            </CardContent>
-          </Card>
-        ) : (
-          <div className="h-full flex items-center justify-center bg-card/50 rounded-lg border border-border/80">
-            <span className="text-sm font-medium text-muted-foreground/80">No tank configuration exists for this Location and Product combination.</span>
+      <Card className="bg-card/50 border-border/80 rounded-lg">
+        <CardHeader className="py-3 px-4 border-b border-border/60 flex flex-row items-center justify-between">
+          <CardTitle className="text-sm font-semibold text-foreground/80">{sel.locationName} · {sel.productName} — projected stock</CardTitle>
+          <div className="flex gap-2 text-[10px]">
+            {sel.firstDryOutDay !== null && <span className="px-2 py-0.5 rounded-full bg-red-500/10 text-red-400 border border-red-500/20">DRY-OUT day {sel.firstDryOutDay}</span>}
+            {sel.firstTankTopDay !== null && <span className="px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20">TANK-TOP day {sel.firstTankTopDay}</span>}
+            {sel.firstDryOutDay === null && sel.firstTankTopDay === null && <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">WITHIN LIMITS</span>}
           </div>
-        )}
-      </div>
+        </CardHeader>
+        <CardContent className="p-4 h-[360px]">
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={chartData} margin={{ top: 10, right: 20, bottom: 0, left: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#ffffff10" />
+              <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#94a3b8' }} interval={6} />
+              <YAxis tick={{ fontSize: 10, fill: '#94a3b8' }} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
+              <Tooltip contentStyle={{ background: '#0f172a', border: '1px solid #ffffff20', borderRadius: 8, fontSize: 12 }} formatter={(v: any) => [`${Number(v).toLocaleString()} MT`, 'Stock']} />
+              <ReferenceLine y={sel.smax} stroke="#f59e0b" strokeDasharray="4 4" label={{ value: 'Tank-top', fill: '#f59e0b', fontSize: 10, position: 'insideTopRight' }} />
+              <ReferenceLine y={sel.smin} stroke="#ef4444" strokeDasharray="4 4" label={{ value: 'Dry-out', fill: '#ef4444', fontSize: 10, position: 'insideBottomRight' }} />
+              <Line type="stepAfter" dataKey="stock" stroke="#6366f1" strokeWidth={2} dot={false} />
+            </LineChart>
+          </ResponsiveContainer>
+        </CardContent>
+      </Card>
+
+      <Card className="bg-card/50 border-border/80 rounded-lg">
+        <CardHeader className="py-3 px-4 border-b border-border/60"><CardTitle className="text-xs font-semibold text-foreground/80">Nodes at risk ({atRisk.length})</CardTitle></CardHeader>
+        <CardContent className="p-3">
+          {atRisk.length === 0 ? <div className="text-xs text-emerald-400 p-2">All nodes stay within dry-out and tank-top limits across the horizon.</div> :
+            <div className="grid grid-cols-2 gap-2">
+              {atRisk.map(p => (
+                <div key={`${p.locationId}|${p.productId}`} className="flex justify-between items-center bg-background/50 p-2 rounded-lg border border-border/80 text-xs">
+                  <button className="text-foreground/80 hover:text-indigo-300" onClick={() => setKey(`${p.locationId}|${p.productId}`)}>{p.locationName} · {p.productName}</button>
+                  <div className="flex items-center gap-2">
+                    <span className={p.firstDryOutDay !== null ? 'text-red-400' : 'text-amber-400'}>{p.firstDryOutDay !== null ? `dry-out d${p.firstDryOutDay}` : `tank-top d${p.firstTankTopDay}`}</span>
+                    {tankFor(p.locationId, p.productId) && <button onClick={() => setOpenTank(tankFor(p.locationId, p.productId))} className="px-2 py-0.5 rounded bg-indigo-600 hover:bg-indigo-500 text-white text-[10px]">Tank ›</button>}
+                  </div>
+                </div>
+              ))}
+            </div>}
+        </CardContent>
+      </Card>
+
+      <Modal open={!!openTank} onClose={() => setOpenTank(null)}
+        title={openTank ? `${openTank.name} — ${data.products.find(p => p.id === openTank.productId)?.name}` : ''}
+        subtitle={openTank ? data.locations.find(l => l.id === openTank.locationId)?.name : ''} width="max-w-3xl">
+        {openTank && <TankDetail tank={openTank} data={data} />}
+      </Modal>
     </div>
   );
 }

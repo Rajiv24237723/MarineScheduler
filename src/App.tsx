@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState, useEffect } from 'react';
-import { Ship, LayoutDashboard, CalendarDays, Factory, Map as MapIcon, Repeat2, Settings, AlertTriangle, Search, Database, TrendingUp, Bell } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import { Ship, LayoutDashboard, CalendarDays, Factory, Map as MapIcon, Settings, AlertTriangle, Search, Database, TrendingUp, Bell } from 'lucide-react';
 import { DashboardData } from './types';
 import DashboardView from './components/DashboardView';
 import SchedulerView from './components/SchedulerView';
@@ -13,21 +13,37 @@ import TrackingView from './components/TrackingView';
 import ReplanningView from './components/ReplanningView';
 import MasterDataView from './components/MasterDataView';
 import InventoryView from './components/InventoryView';
+import SettingsView from './components/SettingsView';
 import { cn } from './lib/utils';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [stream, setStream] = useState('POL');
   const [data, setData] = useState<DashboardData | null>(null);
+  const [optimizing, setOptimizing] = useState(false);
+  const [attempts, setAttempts] = useState(12);
 
-  useEffect(() => {
-    fetch(`/api/dashboard?stream=${stream}`)
-      .then(r => r.json())
-      .then(d => setData(d))
-      .catch(e => console.error(e));
+  const load = useCallback(async () => {
+    const r = await fetch(`/api/dashboard?stream=${stream}`);
+    setData(await r.json());
   }, [stream]);
 
+  useEffect(() => { setData(null); load().catch(console.error); }, [load]);
+
+  const runOptimize = useCallback(async () => {
+    setOptimizing(true);
+    try {
+      await fetch(`/api/optimize?stream=${stream}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ options: { alnsIterations: attempts } }) });
+      await load();
+    } catch (e) { console.error(e); }
+    setOptimizing(false);
+  }, [stream, load, attempts]);
+
+  const reseed = useCallback(async () => { await fetch('/api/admin/reseed', { method: 'POST' }); await load(); }, [load]);
+
   if (!data) return <div className="flex items-center justify-center h-screen w-screen bg-zinc-950 text-zinc-300">Loading Marine Scheduler...</div>;
+
+  const activeVersion = data.versions?.find(v => v.status === 'Active');
 
   const navigationGroups = [
     {
@@ -65,7 +81,7 @@ export default function App() {
   ];
 
   const allTabs = navigationGroups.flatMap(g => g.items);
-  const activeTabLabel = allTabs.find(t => t.id === activeTab)?.label || 'Command Center';
+  const activeTabLabel = allTabs.find(t => t.id === activeTab)?.label || (activeTab === 'settings' ? 'Settings' : 'Command Center');
 
   return (
     <div className="flex h-screen w-full bg-background text-foreground overflow-hidden font-sans selection:bg-indigo-500/30">
@@ -133,9 +149,9 @@ export default function App() {
         </div>
 
         <div className="p-4 border-t border-border/60">
-          <button className="flex items-center w-full px-3 py-2 text-sm font-medium text-muted-foreground hover:text-foreground/90 hover:bg-muted rounded-lg transition-colors">
-            <Settings className="w-4 h-4 mr-3 text-muted-foreground/80" />
-            <span className="truncate">Planner Settings</span>
+          <button onClick={() => setActiveTab('settings')} className={cn("flex items-center w-full px-3 py-2 text-sm font-medium rounded-lg transition-colors", activeTab === 'settings' ? "bg-indigo-500/10 text-indigo-300" : "text-muted-foreground hover:text-foreground/90 hover:bg-muted")}>
+            <Settings className={cn("w-4 h-4 mr-3", activeTab === 'settings' ? "text-indigo-400" : "text-muted-foreground/80")} />
+            <span className="truncate">Settings</span>
           </button>
         </div>
       </div>
@@ -149,19 +165,19 @@ export default function App() {
         <header className="h-16 flex items-center justify-between px-8 border-b border-border/60 bg-card/80 backdrop-blur-md relative z-20 shadow-sm">
           <div className="flex flex-col">
             <div className="flex items-center gap-4 text-xs font-mono text-muted-foreground">
-              <span className="flex items-center gap-1.5"><span className="text-muted-foreground/80">ACTIVE PLAN:</span> <span className="text-foreground/90 font-medium font-sans">Jul-2026 Operational Plan</span> <span className="text-indigo-400 border border-indigo-400/30 px-1.5 py-0.5 rounded text-[10px] font-sans font-medium">v17</span></span>
+              <span className="flex items-center gap-1.5"><span className="text-muted-foreground/80">ACTIVE PLAN:</span> <span className="text-foreground/90 font-medium font-sans">Jul-Aug 2026 · {stream}</span> {activeVersion ? <span className="text-indigo-400 border border-indigo-400/30 px-1.5 py-0.5 rounded text-[10px] font-sans font-medium">v{activeVersion.version}</span> : <span className="text-muted-foreground/60 font-sans">no plan yet</span>}</span>
               <span className="text-border">|</span>
-              <span className="flex items-center gap-1.5"><span className="text-muted-foreground/80">HORIZON:</span> <span className="font-sans">10 Jul - 31 Aug 2026</span></span>
+              <span className="flex items-center gap-1.5"><span className="text-muted-foreground/80">HORIZON:</span> <span className="font-sans">01 Jul - 31 Aug 2026</span></span>
               <span className="text-border">|</span>
-              <span className="flex items-center gap-1.5"><span className="text-muted-foreground/80">AS OF:</span> <span className="font-sans">10 Jul 2026, 14:02 PDT</span></span>
+              <span className="flex items-center gap-1.5"><span className="text-muted-foreground/80">SERVED:</span> <span className="font-sans">{data.kpis?.demandServedPct ?? 0}%</span></span>
             </div>
           </div>
           <div className="flex items-center gap-4">
-            <button className="px-3 py-1.5 text-xs font-medium bg-muted hover:bg-accent border border-border/80 rounded-md text-foreground/90 transition-colors">
-              Compare Plan
+            <button onClick={() => setActiveTab('replan')} className="px-3 py-1.5 text-xs font-medium bg-muted hover:bg-accent border border-border/80 rounded-md text-foreground/90 transition-colors">
+              Versions
             </button>
-            <button className="px-3 py-1.5 text-xs font-medium bg-indigo-600 hover:bg-indigo-500 text-white rounded-md transition-colors shadow-sm">
-              Run / Replan
+            <button onClick={runOptimize} disabled={optimizing} className="px-3 py-1.5 text-xs font-medium bg-indigo-600 hover:bg-indigo-500 text-white rounded-md transition-colors shadow-sm disabled:opacity-50">
+              {optimizing ? 'Optimizing…' : 'Run Optimizer'}
             </button>
           </div>
         </header>
@@ -188,13 +204,14 @@ export default function App() {
         </header>
         
         <main className="flex-1 overflow-auto p-8 relative z-10 flex flex-col">
-          {activeTab === 'dashboard' && <DashboardView data={data} />}
-          {activeTab === 'scheduler' && <SchedulerView data={data} stream={stream} />}
+          {activeTab === 'dashboard' && <DashboardView data={data} onGoto={setActiveTab} />}
+          {activeTab === 'scheduler' && <SchedulerView data={data} stream={stream} onOptimize={runOptimize} optimizing={optimizing} />}
           {activeTab === 'inventory' && <InventoryView data={data} />}
           {activeTab === 'tanks' && <TankFarmView data={data} />}
           {activeTab === 'tracking' && <TrackingView data={data} />}
-          {activeTab === 'replan' && <ReplanningView data={data} />}
-          {activeTab === 'master' && <MasterDataView stream={stream} data={data} />}
+          {activeTab === 'replan' && <ReplanningView data={data} stream={stream} refresh={load} />}
+          {activeTab === 'master' && <MasterDataView stream={stream} data={data} refresh={load} />}
+          {activeTab === 'settings' && <SettingsView data={data} stream={stream} attempts={attempts} setAttempts={setAttempts} onReseed={reseed} />}
         </main>
       </div>
     </div>

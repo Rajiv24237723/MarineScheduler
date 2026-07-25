@@ -1,169 +1,144 @@
-import { DashboardData } from '../types';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { format, addDays, parseISO } from 'date-fns';
 import { useState } from 'react';
+import { DashboardData, Voyage } from '../types';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Modal } from '@/components/ui/modal';
+import { VoyageDetail } from './VoyageDetail';
+import { format, addDays } from 'date-fns';
 
-export default function SchedulerView({ data, stream }: { data: DashboardData, stream: string }) {
-  // Simple custom CSS grid Gantt for demo
-  const startDate = new Date();
-  const days = Array.from({length: 7}).map((_, i) => addDays(startDate, i));
-  const [optimizing, setOptimizing] = useState(false);
-  const [result, setResult] = useState<any>(null);
+const START = new Date('2026-07-01T00:00:00Z');
+const fmtM = (n: number) => `₹${(n / 1e6).toFixed(1)}M`;
 
-  const handleOptimize = async () => {
-    setOptimizing(true);
-    try {
-      const res = await fetch(`/api/optimize?stream=${stream}`, { method: 'POST' });
-      const optimized = await res.json();
-      setResult(optimized);
-    } catch (e) {
-      console.error(e);
-    }
-    setOptimizing(false);
-  };
+export default function SchedulerView({ data, onOptimize, optimizing }: { data: DashboardData; stream: string; onOptimize: () => void; optimizing: boolean }) {
+  const [modalVoyage, setModalVoyage] = useState<Voyage | null>(null);
+  const prod = (id: string) => data.products.find(p => p.id === id);
+  const loc = (id: string) => data.locations.find(l => l.id === id)?.name ?? id;
+  const voyages = [...data.voyages].sort((a, b) => a.vesselName.localeCompare(b.vesselName) || a.startDay - b.startDay);
+  const maxDay = Math.max(31, ...voyages.map(v => v.endDay));
+  const k = data.kpis;
+  const achievable = (data.unserved?.length ?? 0) === 0 && voyages.length > 0;
+  const hasPlan = voyages.length > 0 || (data.versions?.length ?? 0) > 0;
+
+  const primaryProduct = (v: Voyage) => v.stops.flatMap(s => s.ops).find(o => o.op === 'LOAD')?.productId;
 
   return (
-    <div className="space-y-6 flex flex-col flex-1 min-h-0">
+    <div className="space-y-5 flex flex-col flex-1 min-h-0">
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <h3 className="text-lg font-semibold text-foreground">Operational Movement Scheduler</h3>
-          {result?.status === 'success' && (
-            <span className="px-3 py-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full text-[10px] font-medium tracking-wider">
-              Achievable
-            </span>
-          )}
+        <div className="flex items-center gap-3">
+          <h3 className="text-lg font-semibold text-foreground">Operational Movement Plan</h3>
+          {hasPlan && (achievable
+            ? <span className="px-3 py-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full text-[10px] font-medium tracking-wider">ACHIEVABLE · {k.demandServedPct}% SERVED</span>
+            : <span className="px-3 py-1 bg-red-500/10 text-red-400 border border-red-500/20 rounded-full text-[10px] font-medium tracking-wider">SHORTFALL · {k.demandServedPct}% SERVED</span>)}
         </div>
-        <div className="flex gap-2">
-          <button 
-            onClick={handleOptimize}
-            disabled={optimizing}
-            className="px-6 py-2 bg-indigo-600 text-white rounded-lg text-xs font-medium hover:bg-indigo-500 transition-colors disabled:opacity-50 shadow-sm"
-          >
-            {optimizing ? 'Optimizing...' : 'Run Optimizer'}
-          </button>
-          <button className="px-6 py-2 bg-card/50 text-foreground/80 border border-border rounded-lg text-xs font-medium hover:bg-muted transition-colors">
-            Lock Plan
-          </button>
-        </div>
+        <button onClick={onOptimize} disabled={optimizing} className="px-6 py-2 bg-indigo-600 text-white rounded-lg text-xs font-medium hover:bg-indigo-500 transition-colors disabled:opacity-50 shadow-sm">
+          {optimizing ? 'Optimizing…' : 'Run Optimizer'}
+        </button>
       </div>
 
-      {result && result.duals && result.duals.length > 0 && (
+      {!hasPlan && <Card className="bg-card/50 border-border/80 rounded-lg"><CardContent className="p-8 text-center text-sm text-muted-foreground">No plan yet — click <span className="text-indigo-400 font-medium">Run Optimizer</span> to build the {data.stream} movement schedule.</CardContent></Card>}
+
+      {hasPlan && (
+      <div className="grid grid-cols-5 gap-3">
+        {[
+          ['Total cost', fmtM(k.totalCost)],
+          ['Voyages', String(k.voyageCount)],
+          ['Charter recs', String(k.charterRecommendationCount)],
+          ['Fleet utilisation', `${k.utilizationPct}%`],
+          ['Demurrage', fmtM(k.demurrage)],
+        ].map(([label, val]) => (
+          <Card key={label} className="bg-card/50 border-border/80 rounded-lg"><CardContent className="p-3">
+            <div className="text-[11px] text-muted-foreground/80">{label}</div>
+            <div className="text-lg font-semibold text-foreground mt-0.5">{val}</div>
+          </CardContent></Card>
+        ))}
+      </div>
+      )}
+
+      {data.charterRecommendations?.length > 0 && (
         <Card className="bg-card/50 border-amber-500/30 rounded-lg">
-          <CardHeader className="py-3 px-4 bg-amber-500/10 border-b border-amber-500/20 rounded-t-xl">
-            <CardTitle className="text-xs font-semibold text-amber-500">Binding Constraints / Bottlenecks</CardTitle>
-          </CardHeader>
-          <CardContent className="p-4 grid grid-cols-2 gap-4">
-            {result.duals.map((d: any, idx: number) => (
-              <div key={idx} className="flex justify-between items-center bg-background/50 p-2.5 rounded-lg border border-border/80">
-                <span className="text-sm font-medium text-foreground/80">{d.constraint}</span>
-                <span className="text-xs font-mono text-amber-400">+₹{d.shadowPrice.toLocaleString()}/unit</span>
+          <CardHeader className="py-2.5 px-4 bg-amber-500/10 border-b border-amber-500/20 rounded-t-xl"><CardTitle className="text-xs font-semibold text-amber-500">Voyage-Charter Recommendations ({data.charterRecommendations.length})</CardTitle></CardHeader>
+          <CardContent className="p-3 space-y-2 max-h-52 overflow-auto">
+            {data.charterRecommendations.slice(0, 20).map((r, i) => (
+              <div key={i} className="flex justify-between items-center gap-3 bg-background/50 p-2.5 rounded-lg border border-border/80 text-xs">
+                <div>
+                  <div className="text-foreground/90"><span className="text-amber-400 font-medium">Charter {r.vesselClass}</span> · {prod(r.productId)?.name ?? r.productId} {r.qty ? `${Math.round(r.qty / 1000)}k MT` : ''}</div>
+                  <div className="text-[11px] text-muted-foreground mt-0.5">{r.fromLoc ? loc(r.fromLoc) : 'source'} → {loc(r.toLoc)} · by {format(addDays(START, r.byDay || 0), 'MMM d')}</div>
+                </div>
+                {r.estCost > 0 && <span className="font-mono text-amber-400 whitespace-nowrap">{fmtM(r.estCost)}</span>}
               </div>
             ))}
           </CardContent>
         </Card>
       )}
 
-      <Card className="flex-1 min-h-[400px] flex flex-col overflow-hidden bg-card/50 border-border/80 rounded-lg">
-        <CardHeader className="py-3 px-4 border-b border-border/60 bg-card/80 flex flex-row items-center justify-between">
-          <CardTitle className="text-sm font-semibold text-foreground/80">Vessel Schedule (7 Days)</CardTitle>
-          <div className="flex bg-background p-1 rounded-lg border border-border">
-            <button className="px-3 py-1 text-xs font-medium bg-muted text-foreground rounded shadow-sm">Vessels</button>
-            <button className="px-3 py-1 text-xs font-medium text-muted-foreground hover:text-foreground/90">Berths</button>
-            <button className="px-3 py-1 text-xs font-medium text-muted-foreground hover:text-foreground/90">Tanks</button>
-          </div>
-        </CardHeader>
-        <CardContent className="flex-1 p-0 overflow-auto">
-          <div className="min-w-[800px]">
-            {/* Header row */}
-            <div className="flex border-b border-border/60 bg-background/50">
-              <div className="w-48 p-3 font-medium text-xs text-muted-foreground/80 border-r border-border/60 shrink-0">Vessel</div>
-              <div className="flex-1 flex">
-                {days.map((d, i) => (
-                  <div key={i} className="flex-1 p-2 text-xs font-medium text-muted-foreground/80 text-center border-r border-border/60 border-dashed">
-                    {format(d, 'MMM dd')}
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Vessel Rows */}
-            {data.vessels.map(vessel => (
-              <div key={vessel.id} className="flex border-b border-border/60 group hover:bg-muted/30 transition-colors">
-                <div className="w-48 p-3 text-sm border-r border-border/60 shrink-0 flex flex-col justify-center">
-                  <span className="font-mono text-foreground/90 font-semibold">{vessel.name}</span>
-                  <span className="text-[11px] font-medium text-muted-foreground/80 mt-1">{vessel.class} • {vessel.charterType}</span>
-                </div>
-                <div className="flex-1 relative min-h-[60px]">
-                  {/* Grid lines */}
-                  <div className="absolute inset-0 flex pointer-events-none">
-                    {days.map((_, i) => (
-                      <div key={i} className="flex-1 border-r border-border/40 border-dashed"></div>
-                    ))}
-                  </div>
-                  
-                  {/* Render movements for this vessel */}
-                  {data.movements.filter(m => m.vesselId === vessel.id).map(movement => {
-                    const product = data.products.find(p => p.id === movement.productId);
-                    const source = data.locations.find(l => l.id === movement.sourceId);
-                    const dest = data.locations.find(l => l.id === movement.destId);
-                    
-                    return (
-                      <div 
-                        key={movement.id}
-                        className={`absolute top-2 bottom-2 flex rounded-lg shadow-sm border p-0.5 text-xs overflow-hidden cursor-pointer transition-all hover:ring-1 hover:ring-slate-400 hover:z-10 group`}
-                        style={{
-                          left: '5%', // hardcoded positions for demo
-                          width: '80%',
-                          backgroundColor: 'rgba(15, 23, 42, 0.4)', // slate-900/40
-                          borderColor: product?.color ? `${product.color}40` : 'transparent'
-                        }}
-                      >
-                        {/* Ballast Phase */}
-                        <div className="h-full bg-muted/80 border-r border-border/80/50 flex flex-col justify-center px-2 overflow-hidden relative" style={{ width: '15%' }}>
-                          <span className="text-[9px] font-medium text-muted-foreground uppercase tracking-wider">Ballast</span>
-                          <span className="text-[10px] text-muted-foreground/80 truncate whitespace-nowrap">to {source?.name.split(' ')[0]}</span>
-                        </div>
-                        {/* Loading Phase */}
-                        <div className="h-full bg-indigo-500/10 border-r border-indigo-500/20 flex flex-col justify-center px-2 overflow-hidden relative" style={{ width: '15%' }}>
-                           <span className="text-[9px] font-medium text-indigo-400 uppercase tracking-wider">Load</span>
-                           <span className="text-[10px] text-indigo-300 truncate whitespace-nowrap">{source?.name.split(' ')[0]}</span>
-                        </div>
-                        {/* Sailing Phase */}
-                        <div className="h-full border-r flex flex-col justify-center px-3 overflow-hidden relative" style={{ width: '50%', backgroundColor: product?.color ? `${product.color}15` : '', borderColor: product?.color ? `${product.color}30` : '' }}>
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="font-semibold truncate" style={{ color: product?.color }}>
-                              {product?.name}
-                            </span>
-                            <span className="font-mono text-[10px] bg-background/50 px-1.5 py-0.5 rounded text-foreground/80">
-                              {movement.qty.toLocaleString()} MT
-                            </span>
-                          </div>
-                          <div className="flex items-center justify-between mt-0.5">
-                             <span className="text-[10px] text-muted-foreground flex items-center gap-1">
-                               {source?.name.split(' ')[0]} <span className="text-muted-foreground">→</span> {dest?.name.split(' ')[0]}
-                             </span>
-                             <span className="text-[9px] text-muted-foreground/80 uppercase">Laden Sail</span>
-                          </div>
-                          
-                          {/* Hover Details Tooltip Simulation */}
-                          <div className="absolute inset-0 bg-card flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                            <span className="text-[10px] text-foreground/80 font-medium">Click to view voyage details & costs</span>
-                          </div>
-                        </div>
-                        {/* Discharge Phase */}
-                        <div className="h-full bg-indigo-500/10 flex flex-col justify-center px-2 overflow-hidden relative" style={{ width: '20%' }}>
-                           <span className="text-[9px] font-medium text-indigo-400 uppercase tracking-wider">Discharge</span>
-                           <span className="text-[10px] text-indigo-300 truncate whitespace-nowrap">{dest?.name.split(' ')[0]}</span>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
+      {data.unserved?.length > 0 && (
+        <Card className="bg-card/50 border-red-500/30 rounded-lg">
+          <CardHeader className="py-2.5 px-4 bg-red-500/10 border-b border-red-500/20 rounded-t-xl"><CardTitle className="text-xs font-semibold text-red-400">Unserved Demand</CardTitle></CardHeader>
+          <CardContent className="p-3 grid grid-cols-2 gap-2">
+            {data.unserved.map((u, i) => (
+              <div key={i} className="flex justify-between bg-background/50 p-2 rounded-lg border border-border/80 text-xs">
+                <span className="text-foreground/80">{loc(u.locationId)} · {prod(u.productId)?.name}</span>
+                <span className="text-red-400">{u.shortfallMt.toLocaleString()} MT short (day {u.day})</span>
               </div>
             ))}
+          </CardContent>
+        </Card>
+      )}
+
+      {data.duals?.length > 0 && (
+        <Card className="bg-card/50 border-border/80 rounded-lg">
+          <CardHeader className="py-2.5 px-4 border-b border-border/60"><CardTitle className="text-xs font-semibold text-foreground/80">Binding Constraints (shadow prices)</CardTitle></CardHeader>
+          <CardContent className="p-3 grid grid-cols-2 gap-2">
+            {data.duals.map((d, i) => (
+              <div key={i} className="flex justify-between bg-background/50 p-2 rounded-lg border border-border/80 text-xs">
+                <span className="text-foreground/80">{d.constraint}</span>
+                <span className="font-mono text-amber-400">+₹{d.shadowPrice.toLocaleString()}/MT</span>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
+      {voyages.length > 0 && (
+      <Card className="flex-1 min-h-[300px] flex flex-col overflow-hidden bg-card/50 border-border/80 rounded-lg">
+        <CardHeader className="py-2.5 px-4 border-b border-border/60 bg-card/80"><CardTitle className="text-sm font-semibold text-foreground/80">Vessel Voyages — ballast → load(s) → discharge(s) → empty ({voyages.length})</CardTitle></CardHeader>
+        <CardContent className="flex-1 p-0 overflow-auto">
+          {/* Day axis */}
+          <div className="flex border-b border-border/60 bg-background/50 sticky top-0 z-10">
+            <div className="w-44 p-2 text-[11px] font-medium text-muted-foreground/80 border-r border-border/60 shrink-0">Vessel</div>
+            <div className="flex-1 relative h-8">
+              {Array.from({ length: Math.ceil(maxDay / 7) + 1 }).map((_, i) => (
+                <div key={i} className="absolute top-0 h-full border-l border-border/40 border-dashed text-[9px] text-muted-foreground/70 pl-1" style={{ left: `${(i * 7 / maxDay) * 100}%` }}>{format(addDays(START, i * 7), 'MMM d')}</div>
+              ))}
+            </div>
           </div>
+          {voyages.map(v => {
+            const pcol = prod(primaryProduct(v) ?? '')?.color ?? '#64748b';
+            return (
+              <div key={v.id} className="flex border-b border-border/60 hover:bg-muted/20 cursor-pointer" onClick={() => setModalVoyage(v)}>
+                <div className="w-44 p-2 border-r border-border/60 shrink-0">
+                  <div className="font-mono text-xs text-foreground/90 font-semibold">{v.vesselName}</div>
+                  <div className="text-[10px] text-muted-foreground/80">{v.vesselClass} · <span className={v.pool === 'SPOT' ? 'text-amber-400' : ''}>{v.pool}</span> · {fmtM(v.cost)}</div>
+                </div>
+                <div className="flex-1 relative min-h-[46px] py-2">
+                  <div className="absolute top-1/2 -translate-y-1/2 h-3 rounded-full opacity-40" style={{ left: `${(v.startDay / maxDay) * 100}%`, width: `${Math.max(1, (v.endDay - v.startDay) / maxDay * 100)}%`, backgroundColor: pcol }} />
+                  {v.stops.map(s => (
+                    <div key={s.seq} title={`${s.kind} @ ${loc(s.locationId)} (day ${s.arriveDay})`}
+                      className="absolute top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full border-2 border-background"
+                      style={{ left: `calc(${(s.arriveDay / maxDay) * 100}% - 5px)`, backgroundColor: s.kind === 'LOAD' ? '#6366f1' : '#10b981' }} />
+                  ))}
+                </div>
+              </div>
+            );
+          })}
         </CardContent>
       </Card>
+      )}
+
+      <Modal open={!!modalVoyage} onClose={() => setModalVoyage(null)}
+        title={modalVoyage ? `${modalVoyage.vesselName} · ${modalVoyage.vesselClass}` : ''}
+        subtitle={modalVoyage ? `${modalVoyage.pool} · days ${modalVoyage.startDay}–${modalVoyage.endDay} · ${fmtM(modalVoyage.cost)}` : ''} width="max-w-3xl">
+        {modalVoyage && <VoyageDetail voyage={modalVoyage} locations={data.locations} products={data.products} vessels={data.vessels} />}
+      </Modal>
     </div>
   );
 }

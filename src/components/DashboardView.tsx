@@ -1,188 +1,100 @@
+import { useState } from 'react';
 import { DashboardData } from '../types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Activity, Anchor, Droplet, TrendingDown, AlertTriangle, Zap, CheckCircle2, Navigation, Ship, Clock, BarChart3, AlertOctagon, TrendingUp, HelpCircle } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { Modal } from '@/components/ui/modal';
+import { IndianRupee, Ship, CheckCircle2, AlertTriangle, Anchor, Droplet } from 'lucide-react';
 
-export default function DashboardView({ data }: { data: DashboardData }) {
-  const outcomeCards = [
-    { 
-      title: "Projected Logistics Cost", 
-      value: "₹ 4.82M", 
-      target: "+ ₹ 214K vs approved plan",
-      trend: "up",
-      driver: "Main driver: 472 excess ballast NM",
-      icon: TrendingDown, 
-      color: "text-indigo-400" 
-    },
-    { 
-      title: "Plan Service Level", 
-      value: "98.4%", 
-      target: "-1.6% vs target",
-      trend: "down",
-      driver: "1 location under safety stock limit",
-      icon: CheckCircle2, 
-      color: "text-emerald-400" 
-    },
-    { 
-      title: "Locations at Dry-Out Risk", 
-      value: "1", 
-      target: "Chennai (ATF)",
-      trend: "up",
-      driver: "ETA slipped by 14 hours",
-      icon: AlertOctagon, 
-      color: "text-rose-500" 
-    },
-    { 
-      title: "Vessels at Demurrage Risk", 
-      value: "2", 
-      target: "Expected exposure: ₹ 84K",
-      trend: "up",
-      driver: "Paradip port congestion",
-      icon: Clock, 
-      color: "text-amber-500" 
-    },
-    { 
-      title: "Time-Charter Utilization", 
-      value: "94.2%", 
-      target: "+2.1% vs Q2 baseline",
-      trend: "up",
-      driver: "Reduced idle availability",
-      icon: Anchor, 
-      color: "text-teal-400" 
-    },
-    { 
-      title: "Uncovered VC Requirements", 
-      value: "3", 
-      target: "Next 14 days",
-      trend: "neutral",
-      driver: "Requires spot market fixing",
-      icon: HelpCircle, 
-      color: "text-muted-foreground" 
-    }
+const fmtM = (n: number) => `₹${(n / 1e6).toFixed(1)}M`;
+
+export default function DashboardView({ data, onGoto }: { data: DashboardData; onGoto?: (tab: string) => void }) {
+  const [detail, setDetail] = useState<{ sev: string; text: string; action: string } | null>(null);
+  const k = data.kpis;
+  const loc = (id: string) => data.locations.find(l => l.id === id)?.name ?? id;
+  const prod = (id: string) => data.products.find(p => p.id === id)?.name ?? id;
+  const hasPlan = (data.versions?.length ?? 0) > 0;
+
+  const cards = [
+    { label: 'Plan cost', value: fmtM(k.totalCost), icon: IndianRupee, tint: 'text-indigo-400' },
+    { label: 'Demand served', value: `${k.demandServedPct}%`, icon: CheckCircle2, tint: k.demandServedPct >= 100 ? 'text-emerald-400' : 'text-amber-400' },
+    { label: 'Voyages planned', value: String(k.voyageCount), icon: Ship, tint: 'text-sky-400' },
+    { label: 'Charter recs', value: String(k.charterRecommendationCount), icon: Anchor, tint: k.charterRecommendationCount > 0 ? 'text-amber-400' : 'text-muted-foreground' },
+    { label: 'Fleet utilisation', value: `${k.utilizationPct}%`, icon: Ship, tint: 'text-sky-400' },
+    { label: 'Dry-out / tank-top', value: `${k.dryOutDays} / ${k.tankTopDays}`, icon: Droplet, tint: (k.dryOutDays + k.tankTopDays) > 0 ? 'text-red-400' : 'text-emerald-400' },
   ];
 
-  const exceptionQueue = [
-    { severity: 'Critical', issue: 'Chennai ATF dry-out', impactTime: '29 h', impact: '8 h stockout', action: 'Redirect MT Samudra', status: 'Unresolved' },
-    { severity: 'Critical', issue: 'Paradip crude tank unavailable', impactTime: '41 h', impact: 'VLCC demurrage', action: 'Split discharge', status: 'Unresolved' },
-    { severity: 'Warning', issue: 'Kochi HSD ullage below requirement', impactTime: '63 h', impact: '14 h waiting', action: 'Advance rake dispatch', status: 'In Review' },
-    { severity: 'Warning', issue: 'LNGC ETA outside unloading slot', impactTime: '4 d', impact: '₹ 180K exposure', action: 'Swap terminal slot', status: 'New' },
-    { severity: 'Info', issue: 'MT Swarna arriving early', impactTime: '18 h', impact: 'None', action: 'Adjust berth schedule', status: 'Acknowledged' },
-  ];
-
-  const pendingDecisions = [
-    { id: 1, action: "Redirect MT Samudra from Chennai to Ennore", impact: "Resolves dry-out, +₹ 82K bunker cost", deadline: "2 h" },
-    { id: 2, action: "Voyage-charter one MR vessel for 22-27 July", impact: "Covers spot demand, est. ₹ 1.2M", deadline: "14 h" },
-  ];
+  // Exceptions from real diagnostics.
+  const exceptions: Array<{ sev: string; text: string; action: string }> = [];
+  for (const u of data.unserved ?? []) exceptions.push({ sev: 'HIGH', text: `${loc(u.locationId)} · ${prod(u.productId)} short ${u.shortfallMt.toLocaleString()} MT (day ${u.day})`, action: u.reason });
+  for (const p of (data.projection ?? []).filter(p => p.firstDryOutDay !== null)) exceptions.push({ sev: 'HIGH', text: `Dry-out risk: ${p.locationName} · ${p.productName}`, action: `Below floor day ${p.firstDryOutDay} without a lift` });
+  for (const p of (data.projection ?? []).filter(p => p.firstTankTopDay !== null)) exceptions.push({ sev: 'MED', text: `Tank-top risk: ${p.locationName} · ${p.productName}`, action: `Over ceiling day ${p.firstTankTopDay}` });
+  for (const d of data.duals ?? []) exceptions.push({ sev: 'MED', text: `Bottleneck: ${d.constraint}`, action: `Marginal value ₹${d.shadowPrice.toLocaleString()}/MT` });
 
   return (
-    <div className="space-y-6">
-      {/* Outcome Cards Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-        {outcomeCards.map((kpi, i) => (
-          <Card key={i} className="bg-card/50 border-border/80 rounded-lg hover:border-border/80/80 transition-colors group">
-            <CardContent className="p-5 flex flex-col justify-between h-full">
-              <div className="flex items-start justify-between mb-2">
-                <h4 className="text-sm font-semibold text-muted-foreground">{kpi.title}</h4>
-                <div className={cn("p-1.5 rounded-lg bg-muted/50", kpi.color)}>
-                  <kpi.icon className="w-4 h-4" />
-                </div>
-              </div>
-              <div>
-                <div className="text-2xl font-mono font-semibold text-foreground mb-1">{kpi.value}</div>
-                <div className={cn("text-xs font-medium mb-2", 
-                  kpi.trend === 'down' && kpi.color.includes('emerald') ? 'text-rose-400' :
-                  kpi.trend === 'up' && kpi.color.includes('rose') ? 'text-rose-400' :
-                  kpi.trend === 'up' && kpi.color.includes('amber') ? 'text-amber-400' :
-                  'text-muted-foreground'
-                )}>
-                  {kpi.target}
-                </div>
-                <div className="text-[11px] text-muted-foreground/80 font-medium">
-                  {kpi.driver}
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+    <div className="space-y-5">
+      <div className="grid grid-cols-3 gap-3">
+        {cards.map(c => (
+          <Card key={c.label} className="bg-card/50 border-border/80 rounded-lg"><CardContent className="p-4 flex items-center justify-between">
+            <div><div className="text-[11px] text-muted-foreground/80">{c.label}</div><div className="text-xl font-semibold text-foreground mt-0.5">{c.value}</div></div>
+            <c.icon className={`w-5 h-5 ${c.tint}`} />
+          </CardContent></Card>
         ))}
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-        {/* Exception Queue */}
-        <Card className="xl:col-span-2 bg-card/50 border-border/80 rounded-lg flex flex-col">
-          <CardHeader className="border-b border-border/50 bg-background/50 rounded-t-xl px-5 py-4 flex flex-row items-center justify-between">
-            <CardTitle className="text-sm font-semibold text-foreground/90 flex items-center gap-2">
-              <AlertOctagon className="w-4 h-4 text-rose-500" />
-              Exception Queue
-            </CardTitle>
-            <div className="text-xs font-medium text-muted-foreground/80">4 Unresolved</div>
-          </CardHeader>
-          <CardContent className="p-0 overflow-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="border-b border-border/50 bg-card/30">
-                  <th className="p-3 pl-5 text-[11px] font-semibold text-muted-foreground/80 uppercase tracking-wider">Severity</th>
-                  <th className="p-3 text-[11px] font-semibold text-muted-foreground/80 uppercase tracking-wider">Exception</th>
-                  <th className="p-3 text-[11px] font-semibold text-muted-foreground/80 uppercase tracking-wider text-right">Time to Impact</th>
-                  <th className="p-3 text-[11px] font-semibold text-muted-foreground/80 uppercase tracking-wider">Estimated Impact</th>
-                  <th className="p-3 pr-5 text-[11px] font-semibold text-muted-foreground/80 uppercase tracking-wider">Recommended Action</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border/50">
-                {exceptionQueue.map((ex, i) => (
-                  <tr key={i} className="hover:bg-muted/30 transition-colors group cursor-pointer">
-                    <td className="p-3 pl-5">
-                      <span className={cn("px-2 py-1 rounded text-[10px] font-semibold border",
-                        ex.severity === 'Critical' ? "bg-rose-500/10 text-rose-400 border-rose-500/20" :
-                        ex.severity === 'Warning' ? "bg-amber-500/10 text-amber-400 border-amber-500/20" :
-                        "bg-muted text-muted-foreground border-border/80"
-                      )}>
-                        {ex.severity}
-                      </span>
-                    </td>
-                    <td className="p-3 text-sm font-medium text-foreground/90">{ex.issue}</td>
-                    <td className="p-3 text-sm font-mono text-muted-foreground text-right">{ex.impactTime}</td>
-                    <td className="p-3 text-sm text-muted-foreground">{ex.impact}</td>
-                    <td className="p-3 pr-5 text-sm text-indigo-400 font-medium hover:text-indigo-300 transition-colors">{ex.action}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </CardContent>
-        </Card>
+      {!hasPlan && (
+        <Card className="bg-card/50 border-border/80 rounded-lg"><CardContent className="p-6 text-center text-sm text-muted-foreground">
+          No active plan for {data.stream}. Open <button className="text-indigo-400 font-medium" onClick={() => onGoto?.('scheduler')}>Operational Plan</button> and run the optimizer.
+        </CardContent></Card>
+      )}
 
-        {/* Recommended Decisions */}
-        <Card className="bg-card/50 border-border/80 rounded-lg flex flex-col">
-          <CardHeader className="border-b border-border/50 bg-background/50 rounded-t-xl px-5 py-4">
-            <CardTitle className="text-sm font-semibold text-foreground/90 flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-              Recommended Decisions
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="p-0">
+      <Card className="bg-card/50 border-border/80 rounded-lg">
+        <CardHeader className="py-3 px-4 border-b border-border/60"><CardTitle className="text-sm font-semibold text-foreground/80">Exception Queue ({exceptions.length})</CardTitle></CardHeader>
+        <CardContent className="p-0">
+          {exceptions.length === 0 ? <div className="p-4 text-xs text-emerald-400 flex items-center gap-2"><CheckCircle2 className="w-4 h-4" /> No open exceptions — plan meets all demand within limits.</div> :
             <div className="divide-y divide-border/50">
-              {pendingDecisions.map(decision => (
-                <div key={decision.id} className="p-5 hover:bg-muted/30 transition-colors">
-                  <div className="flex justify-between items-start mb-2">
-                    <h5 className="text-sm font-medium text-foreground/90">{decision.action}</h5>
-                    <span className="text-[10px] font-mono text-rose-400 bg-rose-500/10 px-1.5 py-0.5 rounded ml-2 whitespace-nowrap">
-                      {decision.deadline}
-                    </span>
+              {exceptions.slice(0, 12).map((e, i) => (
+                <button key={i} onClick={() => setDetail(e)} className="w-full text-left flex items-center justify-between px-4 py-2.5 text-xs hover:bg-muted/20">
+                  <div className="flex items-center gap-3">
+                    <span className={`px-1.5 py-0.5 rounded text-[9px] font-medium ${e.sev === 'HIGH' ? 'bg-red-500/10 text-red-400 border border-red-500/20' : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'}`}>{e.sev}</span>
+                    <span className="text-foreground/85">{e.text}</span>
                   </div>
-                  <p className="text-xs text-muted-foreground mb-4">{decision.impact}</p>
-                  <div className="flex gap-2">
-                    <button className="flex-1 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium rounded-lg transition-colors">
-                      Approve
-                    </button>
-                    <button className="flex-1 py-1.5 bg-muted hover:bg-accent text-foreground/80 border border-border/80 text-xs font-medium rounded-lg transition-colors">
-                      Review
-                    </button>
-                  </div>
-                </div>
+                  <span className="text-muted-foreground">{e.action} ›</span>
+                </button>
               ))}
+            </div>}
+        </CardContent>
+      </Card>
+
+      <Card className="bg-card/50 border-border/80 rounded-lg">
+        <CardHeader className="py-3 px-4 border-b border-border/60"><CardTitle className="text-sm font-semibold text-foreground/80 flex items-center gap-2"><AlertTriangle className="w-4 h-4 text-amber-400" /> Recommended Decisions</CardTitle></CardHeader>
+        <CardContent className="p-3 space-y-2">
+          {(data.charterRecommendations ?? []).length === 0 ? <div className="text-xs text-muted-foreground p-2">No charter actions recommended — the owned/TC fleet covers the plan.</div> :
+            data.charterRecommendations.slice(0, 8).map((r, i) => (
+              <div key={i} className="flex items-center justify-between bg-background/50 p-2.5 rounded-lg border border-border/80 text-xs">
+                <div>
+                  <div className="text-foreground/90"><span className="text-amber-400 font-medium">Charter {r.vesselClass}</span> · {prod(r.productId)} {r.qty ? `${Math.round(r.qty / 1000)}k MT` : ''}</div>
+                  <div className="text-[11px] text-muted-foreground mt-0.5">{r.fromLoc ? loc(r.fromLoc) : 'source'} → {loc(r.toLoc)} · by day {r.byDay}</div>
+                </div>
+                <button onClick={() => onGoto?.('scheduler')} className="ml-3 px-2.5 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded text-[10px] font-medium whitespace-nowrap">Review</button>
+              </div>
+            ))}
+        </CardContent>
+      </Card>
+
+      <Modal open={!!detail} onClose={() => setDetail(null)} title="Exception detail" width="max-w-lg">
+        {detail && (
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${detail.sev === 'HIGH' ? 'bg-red-500/10 text-red-400 border border-red-500/20' : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'}`}>{detail.sev}</span>
+              <span className="text-sm text-foreground/90">{detail.text}</span>
             </div>
-          </CardContent>
-        </Card>
-      </div>
+            <div className="bg-background/50 rounded-lg border border-border/70 p-3 text-xs text-muted-foreground">{detail.action}</div>
+            <div className="flex gap-2">
+              <button onClick={() => { setDetail(null); onGoto?.('inventory'); }} className="px-3 py-1.5 bg-muted hover:bg-accent border border-border/80 rounded-lg text-xs">Open Inventory Forecast</button>
+              <button onClick={() => { setDetail(null); onGoto?.('scheduler'); }} className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs">Open Operational Plan</button>
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }
