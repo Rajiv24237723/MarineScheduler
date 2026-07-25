@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Modal } from '@/components/ui/modal';
+import { toast } from './ui/toast';
 import { Plus, Trash2, Maximize2, Upload, Download } from 'lucide-react';
 import { DashboardData, Vessel } from '../types';
 
@@ -97,7 +98,8 @@ export default function MasterDataView({ stream, data, refresh }: { stream: stri
       const parsed = parseCSV(csvText, cfg.cols, stream);
       await fetch(`/api/master/${cfg.table}/bulk`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rows: parsed, replaceStream: replace ? stream : undefined }) });
       await refresh(); setImportOpen(false); setCsvText('');
-    } catch (e) { console.error(e); }
+      toast(`Imported ${parsed.length} row(s) into ${tab}${replace ? ` (replaced ${stream})` : ''}. Re-run the optimiser to apply.`, 'success');
+    } catch (e) { console.error(e); toast('Import failed — check the CSV format.', 'error'); }
     setImporting(false);
   };
   const onFile = (f?: File) => { if (!f) return; const r = new FileReader(); r.onload = () => setCsvText(String(r.result)); r.readAsText(f); };

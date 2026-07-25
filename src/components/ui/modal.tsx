@@ -15,8 +15,8 @@ export function Modal({ open, onClose, title, subtitle, children, width = 'max-w
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-[2000] flex items-center justify-center p-4" onClick={onClose}>
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm animate-in fade-in" />
-      <div onClick={e => e.stopPropagation()} className={`relative ${width} w-full max-h-[88vh] overflow-auto rounded-xl border border-border/80 bg-card shadow-2xl`}>
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm animate-fade-in" />
+      <div onClick={e => e.stopPropagation()} className={`animate-scale-in relative ${width} w-full max-h-[88vh] overflow-auto rounded-xl border border-border/80 bg-card shadow-2xl`}>
         <div className="sticky top-0 z-10 flex items-start justify-between gap-4 px-5 py-4 border-b border-border/60 bg-card/95 backdrop-blur">
           <div>
             {title && <h3 className="text-base font-semibold text-foreground">{title}</h3>}

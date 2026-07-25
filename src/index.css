@@ -45,7 +45,7 @@
     --secondary-foreground: 0 0% 98%;
     
     --muted: 240 4% 12%;
-    --muted-foreground: 240 5% 65%;
+    --muted-foreground: 240 5% 72%;
     
     --accent: 240 4% 12%;
     --accent-foreground: 0 0% 98%;
@@ -67,5 +67,51 @@
   }
   body {
     @apply bg-background text-foreground;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
   }
+
+  /* Keyboard focus ring on all interactive elements (accent, subtle). */
+  :focus-visible {
+    outline: 2px solid rgb(99 102 241 / 0.7);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+  button, [role="button"], select, input, textarea, a {
+    transition: background-color .15s ease, border-color .15s ease, color .15s ease, box-shadow .15s ease, transform .08s ease, opacity .15s ease;
+  }
+  button:not(:disabled):active, [role="button"]:active {
+    transform: translateY(0.5px) scale(0.994);
+  }
+  ::selection { background: rgb(99 102 241 / 0.32); color: hsl(var(--foreground)); }
+
+  /* Themed scrollbars (dark). */
+  * { scrollbar-width: thin; scrollbar-color: hsl(240 4% 22%) transparent; }
+  *::-webkit-scrollbar { width: 10px; height: 10px; }
+  *::-webkit-scrollbar-track { background: transparent; }
+  *::-webkit-scrollbar-thumb { background: hsl(240 4% 20%); border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }
+  *::-webkit-scrollbar-thumb:hover { background: hsl(240 4% 30%); }
+}
+
+/* ---- Motion system (respect reduced-motion) ------------------------------ */
+@keyframes fadeIn { from { opacity: 0 } to { opacity: 1 } }
+@keyframes fadeInUp { from { opacity: 0; transform: translateY(6px) } to { opacity: 1; transform: none } }
+@keyframes scaleIn { from { opacity: 0; transform: scale(0.97) } to { opacity: 1; transform: none } }
+@keyframes progressSlide { 0% { left: -40% } 100% { left: 100% } }
+@keyframes toastIn { from { opacity: 0; transform: translateY(8px) scale(0.98) } to { opacity: 1; transform: none } }
+
+.animate-fade-in { animation: fadeIn .2s ease-out both; }
+.animate-fade-in-up { animation: fadeInUp .24s ease-out both; }
+.animate-scale-in { animation: scaleIn .18s ease-out both; }
+.animate-toast-in { animation: toastIn .22s cubic-bezier(0.22,1,0.36,1) both; }
+.progress-track { position: fixed; inset: 0 0 auto 0; height: 2px; overflow: hidden; z-index: 3000; background: rgb(99 102 241 / 0.12); }
+.progress-bar { position: absolute; top: 0; height: 100%; width: 40%; background: linear-gradient(90deg, transparent, rgb(99 102 241), transparent); animation: progressSlide 1.1s ease-in-out infinite; }
+
+/* Gentle hover lift for clickable cards/rows opted in via .lift */
+.lift { transition: transform .12s ease, border-color .15s ease, background-color .15s ease; }
+.lift:hover { transform: translateY(-1px); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; scroll-behavior: auto !important; }
+  .progress-bar { animation: none; width: 100%; left: 0; opacity: .5; }
 }

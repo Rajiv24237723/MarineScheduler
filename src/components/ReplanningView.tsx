@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { DashboardData, Voyage } from '../types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Modal } from '@/components/ui/modal';
+import { toast } from './ui/toast';
 import { VoyageDetail } from './VoyageDetail';
 import { GitCompare, AlertTriangle, CheckCircle2, Ship, Anchor, Snowflake, Plus } from 'lucide-react';
 import { format, addDays } from 'date-fns';
@@ -54,10 +55,10 @@ export default function ReplanningView({ data, stream, refresh }: { data: Dashbo
   const hasEvents = events.length > 0;
 
   const doCheck = async () => { setBusy(true); setDraft(null); try { const r = await fetch(`/api/scenario/check?stream=${stream}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ options: buildOptions() }) }); setCheck(await r.json()); } catch (e) { console.error(e); } setBusy(false); };
-  const doSimulate = async () => { setBusy(true); try { const r = await fetch(`/api/scenario/apply?stream=${stream}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: mode, options: buildOptions() }) }); const res = await r.json(); setDraft(res); setCheck({ hasPlan: true, holds: res.currentPlanHolds, breaches: res.breaches, activeVersion: active?.version }); await refresh(); } catch (e) { console.error(e); } setBusy(false); };
-  const publish = async (id: string) => { await fetch(`/api/versions/${id}/publish`, { method: 'POST' }); setDraft(null); setCheck(null); await refresh(); };
-  const rollback = async (id: string) => { await fetch(`/api/versions/${id}/rollback`, { method: 'POST' }); await refresh(); };
-  const discard = async (id: string) => { await fetch(`/api/versions/${id}`, { method: 'DELETE' }); if (draft?.versionId === id) setDraft(null); await refresh(); };
+  const doSimulate = async () => { setBusy(true); try { const r = await fetch(`/api/scenario/apply?stream=${stream}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: mode, options: buildOptions() }) }); const res = await r.json(); setDraft(res); setCheck({ hasPlan: true, holds: res.currentPlanHolds, breaches: res.breaches, activeVersion: active?.version }); await refresh(); toast(`Recovery draft created — ${res.changeSet?.removed ?? 0} removed / ${res.changeSet?.added ?? 0} added.`, 'success'); } catch (e) { console.error(e); toast('Simulation failed.', 'error'); } setBusy(false); };
+  const publish = async (id: string) => { await fetch(`/api/versions/${id}/publish`, { method: 'POST' }); setDraft(null); setCheck(null); await refresh(); toast('Draft published as the operating plan.', 'success'); };
+  const rollback = async (id: string) => { await fetch(`/api/versions/${id}/rollback`, { method: 'POST' }); await refresh(); toast('Rolled back — this version is now active.', 'success'); };
+  const discard = async (id: string) => { await fetch(`/api/versions/${id}`, { method: 'DELETE' }); if (draft?.versionId === id) setDraft(null); await refresh(); toast('Draft discarded.', 'info'); };
   const compare = async () => { if (!a || !b) return; const r = await fetch(`/api/versions/compare?a=${a}&b=${b}`); setCmp(await r.json()); };
   const openVersion = async (id: string, v: number) => { const r = await fetch(`/api/versions/${id}`); const row = await r.json(); setVersionVoyages({ v, voyages: row.payload?.voyages ?? [] }); };
 

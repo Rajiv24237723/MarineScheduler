@@ -4,8 +4,9 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { Ship, LayoutDashboard, CalendarDays, Factory, Map as MapIcon, Settings, AlertTriangle, Search, Database, TrendingUp, Bell } from 'lucide-react';
+import { Ship, LayoutDashboard, CalendarDays, Factory, Map as MapIcon, Settings, AlertTriangle, Database, TrendingUp, Bell } from 'lucide-react';
 import { DashboardData } from './types';
+import { Toaster, TopProgress, toast } from './components/ui/toast';
 import DashboardView from './components/DashboardView';
 import SchedulerView from './components/SchedulerView';
 import TankFarmView from './components/TankFarmView';
@@ -33,15 +34,28 @@ export default function App() {
   const runOptimize = useCallback(async () => {
     setOptimizing(true);
     try {
-      await fetch(`/api/optimize?stream=${stream}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ options: { alnsIterations: attempts } }) });
+      const r = await fetch(`/api/optimize?stream=${stream}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ options: { alnsIterations: attempts } }) });
+      const res = await r.json();
       await load();
-    } catch (e) { console.error(e); }
+      if (res?.achievable) toast(`${stream} plan optimised — ${res.kpis?.demandServedPct ?? 0}% served, ${res.kpis?.voyageCount ?? 0} voyages${res.kpis?.charterRecommendationCount ? `, ${res.kpis.charterRecommendationCount} charter rec(s)` : ''}.`, 'success');
+      else toast(`${stream} plan has a shortfall — ${res?.unserved?.length ?? 0} node(s) unserved (${res?.kpis?.demandServedPct ?? 0}% served).`, 'info');
+    } catch (e) { console.error(e); toast('Optimisation failed — check the server logs.', 'error'); }
     setOptimizing(false);
   }, [stream, load, attempts]);
 
-  const reseed = useCallback(async () => { await fetch('/api/admin/reseed', { method: 'POST' }); await load(); }, [load]);
+  const reseed = useCallback(async () => {
+    try { await fetch('/api/admin/reseed', { method: 'POST' }); await load(); toast('Demo data reset to the seeded network.', 'success'); }
+    catch (e) { console.error(e); toast('Reset failed.', 'error'); }
+  }, [load]);
 
-  if (!data) return <div className="flex items-center justify-center h-screen w-screen bg-zinc-950 text-zinc-300">Loading Marine Scheduler...</div>;
+  if (!data) return (
+    <div className="flex flex-col items-center justify-center h-screen w-screen bg-background text-muted-foreground gap-3">
+      <div className="w-6 h-6 rounded-full border-2 border-indigo-500/30 border-t-indigo-400 animate-spin" />
+      <span className="text-sm">Loading Marine Scheduler…</span>
+    </div>
+  );
+
+  const alertCount = (data.unserved?.length ?? 0) + (data.kpis?.dryOutDays ?? 0) + (data.kpis?.tankTopDays ?? 0);
 
   const activeVersion = data.versions?.find(v => v.status === 'Active');
 
@@ -94,7 +108,7 @@ export default function App() {
             </div>
             <div>
               <h1 className="font-semibold text-sm tracking-tight text-foreground">Marine Scheduler</h1>
-              <div className="text-[10px] text-muted-foreground/80 font-medium">Enterprise Edition v4.2</div>
+              <div className="text-[10px] text-muted-foreground font-medium">Coastal MIRP Planner</div>
             </div>
           </div>
         </div>
@@ -187,33 +201,31 @@ export default function App() {
           <div className="flex items-center gap-3">
             <h2 className="text-lg font-semibold text-foreground">{activeTabLabel}</h2>
           </div>
-          <div className="flex items-center gap-5">
-            <div className="relative group">
-              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground/80 group-focus-within:text-indigo-400 transition-colors" />
-              <input 
-                type="text" 
-                placeholder="Search resources..." 
-                className="bg-card/50 text-sm rounded-full pl-9 pr-4 py-1.5 border border-border/80 focus:outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/50 w-64 text-foreground/90 placeholder:text-muted-foreground/80 transition-all"
-              />
-            </div>
-            <button className="relative p-2 text-muted-foreground hover:text-foreground transition-colors rounded-full hover:bg-muted">
+          <div className="flex items-center gap-3">
+            {alertCount > 0 && <span className="text-[11px] text-muted-foreground hidden sm:inline">{alertCount} open alert{alertCount === 1 ? '' : 's'}</span>}
+            <button onClick={() => setActiveTab('replan')} aria-label={`Alerts and actions${alertCount ? ` (${alertCount})` : ''}`} title="Alerts & Actions" className="relative p-2 text-muted-foreground hover:text-foreground rounded-full hover:bg-muted">
               <Bell className="w-4 h-4" />
-              <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-rose-500 rounded-full border-2 border-background"></span>
+              {alertCount > 0 && <span className="absolute -top-0.5 -right-0.5 min-w-[15px] h-[15px] px-1 flex items-center justify-center text-[8px] font-semibold bg-rose-500 text-white rounded-full border border-background">{alertCount > 9 ? '9+' : alertCount}</span>}
             </button>
           </div>
         </header>
         
         <main className="flex-1 overflow-auto p-8 relative z-10 flex flex-col">
-          {activeTab === 'dashboard' && <DashboardView data={data} onGoto={setActiveTab} />}
-          {activeTab === 'scheduler' && <SchedulerView data={data} stream={stream} onOptimize={runOptimize} optimizing={optimizing} />}
-          {activeTab === 'inventory' && <InventoryView data={data} />}
-          {activeTab === 'tanks' && <TankFarmView data={data} />}
-          {activeTab === 'tracking' && <TrackingView data={data} />}
-          {activeTab === 'replan' && <ReplanningView data={data} stream={stream} refresh={load} />}
-          {activeTab === 'master' && <MasterDataView stream={stream} data={data} refresh={load} />}
-          {activeTab === 'settings' && <SettingsView data={data} stream={stream} attempts={attempts} setAttempts={setAttempts} onReseed={reseed} />}
+          <div key={activeTab} className="animate-fade-in-up flex-1 flex flex-col min-h-0">
+            {activeTab === 'dashboard' && <DashboardView data={data} onGoto={setActiveTab} />}
+            {activeTab === 'scheduler' && <SchedulerView data={data} stream={stream} onOptimize={runOptimize} optimizing={optimizing} />}
+            {activeTab === 'inventory' && <InventoryView data={data} />}
+            {activeTab === 'tanks' && <TankFarmView data={data} />}
+            {activeTab === 'tracking' && <TrackingView data={data} />}
+            {activeTab === 'replan' && <ReplanningView data={data} stream={stream} refresh={load} />}
+            {activeTab === 'master' && <MasterDataView stream={stream} data={data} refresh={load} />}
+            {activeTab === 'settings' && <SettingsView data={data} stream={stream} attempts={attempts} setAttempts={setAttempts} onReseed={reseed} />}
+          </div>
         </main>
       </div>
+
+      <TopProgress active={optimizing} />
+      <Toaster />
     </div>
   );
 }
