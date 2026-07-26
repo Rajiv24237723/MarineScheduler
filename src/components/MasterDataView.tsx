@@ -170,7 +170,7 @@ export default function MasterDataView({ stream, data, refresh }: { stream: stri
               <div className="grid grid-cols-2 gap-2">
                 {spec('DWT', `${v.dwt.toLocaleString()} MT`)}{spec('Service speed', `${v.speed} kn`)}
                 {spec('Draft laden / ballast', `${v.draftLaden} / ${v.draftBallast} m`)}{spec('Total compartment cap', `${totalCap.toLocaleString()} MT`)}
-                {v.pool === 'SPOT' ? spec('Voyage rate', `$${v.voyageRate}/MT`) : spec('TC hire', `$${v.charterCost.toLocaleString()}/day`)}{spec('Compartments', String(v.compartments.length))}
+                {v.pool === 'SPOT' ? spec('Voyage rate', `$${v.voyageRate}/MT`) : spec(v.pool === 'COA' ? 'COA hire' : 'TC hire', `$${v.charterCost.toLocaleString()}/day`)}{spec('Compartments', String(v.compartments.length))}
               </div>
               <div>
                 <div className="text-[11px] font-medium text-muted-foreground mb-1.5">Compartment layout</div>
