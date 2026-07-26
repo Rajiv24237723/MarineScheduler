@@ -5,7 +5,7 @@
 
 import { useState, useEffect, useCallback, ReactNode } from 'react';
 import { Ship, LayoutDashboard, CalendarDays, Factory, Map as MapIcon, Settings, AlertTriangle, Database, TrendingUp, Bell } from 'lucide-react';
-import { DashboardData } from './types';
+import { DashboardData, Focus } from './types';
 import { Toaster, TopProgress, toast } from './components/ui/toast';
 import { StreamFlag, Pennant } from './components/ui/SignalFlag';
 import { TipProvider, Tip } from './components/ui/tooltip';
@@ -21,6 +21,7 @@ import { cn } from './lib/utils';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [focus, setFocus] = useState<Focus>(null);
   const [stream, setStream] = useState('POL');
   const [data, setData] = useState<DashboardData | null>(null);
   const [optimizing, setOptimizing] = useState(false);
@@ -49,6 +50,9 @@ export default function App() {
     try { await fetch('/api/admin/reseed', { method: 'POST' }); await load(); toast('Demo data reset to the seeded network.', 'success'); }
     catch (e) { console.error(e); toast('Reset failed.', 'error'); }
   }, [load]);
+
+  // Navigate to a tab, optionally focused on a node/tank so detail cards can cross-link.
+  const goto = useCallback((tab: string, f?: Focus) => { setActiveTab(tab); setFocus(f ?? null); }, []);
 
   if (!data) return (
     <div className="flex flex-col items-center justify-center h-screen w-screen bg-background text-muted-foreground gap-3">
@@ -234,10 +238,10 @@ export default function App() {
         
         <main className="flex-1 overflow-auto p-8 relative z-10 flex flex-col">
           <div key={activeTab} className="animate-fade-in-up flex-1 flex flex-col min-h-0">
-            {activeTab === 'dashboard' && <DashboardView data={data} onGoto={setActiveTab} />}
+            {activeTab === 'dashboard' && <DashboardView data={data} onGoto={goto} />}
             {activeTab === 'scheduler' && <SchedulerView data={data} stream={stream} onOptimize={runOptimize} optimizing={optimizing} />}
-            {activeTab === 'inventory' && <InventoryView data={data} />}
-            {activeTab === 'tanks' && <TankFarmView data={data} />}
+            {activeTab === 'inventory' && <InventoryView data={data} goto={goto} focus={focus} />}
+            {activeTab === 'tanks' && <TankFarmView data={data} goto={goto} focus={focus} />}
             {activeTab === 'tracking' && <TrackingView data={data} />}
             {activeTab === 'replan' && <ReplanningView data={data} stream={stream} refresh={load} />}
             {activeTab === 'master' && <MasterDataView stream={stream} data={data} refresh={load} />}

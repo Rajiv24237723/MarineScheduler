@@ -1,13 +1,18 @@
-﻿import { useMemo, useState } from 'react';
-import { DashboardData, Tank } from '../types';
+﻿import { useMemo, useState, useEffect } from 'react';
+import { DashboardData, Tank, Goto, Focus } from '../types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Modal } from '@/components/ui/modal';
 import { TankGauge } from '@/components/ui/TankGauge';
 import { Tip, TipRows } from '@/components/ui/tooltip';
 import { TankDetail } from './TankDetail';
 
-export default function TankFarmView({ data }: { data: DashboardData }) {
+export default function TankFarmView({ data, goto, focus }: { data: DashboardData; goto?: Goto; focus?: Focus }) {
   const [openTank, setOpenTank] = useState<Tank | null>(null);
+  // Open the focused tank when navigated here from another card.
+  useEffect(() => {
+    if (focus?.tankId) { const t = data.tanks.find(x => x.id === focus.tankId); if (t) setOpenTank(t); }
+    else if (focus?.node) { const t = data.tanks.find(x => x.locationId === focus.node!.loc && x.productId === focus.node!.product); if (t) setOpenTank(t); }
+  }, [focus, data.tanks]);
   const loc = (id: string) => data.locations.find(l => l.id === id)?.name ?? id;
   const prod = (id: string) => data.products.find(p => p.id === id);
 
@@ -112,7 +117,7 @@ export default function TankFarmView({ data }: { data: DashboardData }) {
       <Modal open={!!openTank} onClose={() => setOpenTank(null)}
         title={openTank ? `${openTank.name} — ${prod(openTank.productId)?.name}` : ''}
         subtitle={openTank ? loc(openTank.locationId) : ''} width="max-w-3xl">
-        {openTank && <TankDetail tank={openTank} data={data} />}
+        {openTank && <TankDetail tank={openTank} data={data} onNavigate={(tab, f) => { setOpenTank(null); goto?.(tab, f); }} />}
       </Modal>
     </div>
   );

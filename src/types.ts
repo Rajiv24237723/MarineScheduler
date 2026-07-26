@@ -57,5 +57,9 @@ export interface DashboardData {
   versions: VersionSummary[];
 }
 
+/** Cross-view navigation context: land on a tab focused on a specific node or tank. */
+export type Focus = { node?: { loc: string; product: string }; tankId?: string } | null;
+export type Goto = (tab: string, focus?: Focus) => void;
+
 export const START_DATE = new Date('2026-07-01T00:00:00Z');
 export function dayToDate(day: number): Date { const d = new Date(START_DATE); d.setUTCDate(d.getUTCDate() + day); return d; }

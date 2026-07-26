@@ -1,5 +1,5 @@
 ﻿import { useState, ReactNode } from 'react';
-import { DashboardData } from '../types';
+import { DashboardData, Goto } from '../types';
 import { Modal } from '@/components/ui/modal';
 import { StreamFlag, Pennant, CodeBlock } from '@/components/ui/SignalFlag';
 import { Tip, TipRows } from '@/components/ui/tooltip';
@@ -7,8 +7,8 @@ import { Tip, TipRows } from '@/components/ui/tooltip';
 const fmtM = (n: number) => `₹${(n / 1e6).toFixed(1)}M`;
 const SIG = { blue: 'var(--sea-cyan)', yellow: 'var(--sea-amber)', green: 'var(--sea-green)', red: 'var(--sea-red)' };
 
-export default function DashboardView({ data, onGoto }: { data: DashboardData; onGoto?: (tab: string) => void }) {
-  const [detail, setDetail] = useState<{ sev: string; text: string; action: string } | null>(null);
+export default function DashboardView({ data, onGoto }: { data: DashboardData; onGoto?: Goto }) {
+  const [detail, setDetail] = useState<{ sev: string; text: string; action: string; node?: { loc: string; product: string } } | null>(null);
   const k = data.kpis;
   const loc = (id: string) => data.locations.find(l => l.id === id)?.name ?? id;
   const prod = (id: string) => data.products.find(p => p.id === id)?.name ?? id;
@@ -26,10 +26,10 @@ export default function DashboardView({ data, onGoto }: { data: DashboardData; o
     { label: 'Dry / top', value: `${k.dryOutDays}/${k.tankTopDays}`, code: (k.dryOutDays + k.tankTopDays) > 0 ? SIG.red : SIG.green, tip: <TipRows title="Inventory risk (nodes)" rows={[['Dry-out risk', String(k.dryOutDays)], ['Tank-top risk', String(k.tankTopDays)]]} /> },
   ];
 
-  const exceptions: Array<{ sev: string; text: string; action: string }> = [];
-  for (const u of data.unserved ?? []) exceptions.push({ sev: 'HIGH', text: `${loc(u.locationId)} · ${prod(u.productId)} short ${u.shortfallMt.toLocaleString()} MT`, action: `${u.reason} — due day ${u.day}` });
-  for (const p of (data.projection ?? []).filter(p => p.firstDryOutDay !== null)) exceptions.push({ sev: 'HIGH', text: `Dry-out risk — ${p.locationName} · ${p.productName}`, action: `Below floor day ${p.firstDryOutDay} without a lift` });
-  for (const p of (data.projection ?? []).filter(p => p.firstTankTopDay !== null)) exceptions.push({ sev: 'MED', text: `Tank-top risk — ${p.locationName} · ${p.productName}`, action: `Over ceiling day ${p.firstTankTopDay}` });
+  const exceptions: Array<{ sev: string; text: string; action: string; node?: { loc: string; product: string } }> = [];
+  for (const u of data.unserved ?? []) exceptions.push({ sev: 'HIGH', text: `${loc(u.locationId)} · ${prod(u.productId)} short ${u.shortfallMt.toLocaleString()} MT`, action: `${u.reason} — due day ${u.day}`, node: { loc: u.locationId, product: u.productId } });
+  for (const p of (data.projection ?? []).filter(p => p.firstDryOutDay !== null)) exceptions.push({ sev: 'HIGH', text: `Dry-out risk — ${p.locationName} · ${p.productName}`, action: `Below floor day ${p.firstDryOutDay} without a lift`, node: { loc: p.locationId, product: p.productId } });
+  for (const p of (data.projection ?? []).filter(p => p.firstTankTopDay !== null)) exceptions.push({ sev: 'MED', text: `Tank-top risk — ${p.locationName} · ${p.productName}`, action: `Over ceiling day ${p.firstTankTopDay}`, node: { loc: p.locationId, product: p.productId } });
   for (const d of data.duals ?? []) exceptions.push({ sev: 'MED', text: `Bottleneck — ${d.constraint}`, action: `Marginal value ₹${d.shadowPrice.toLocaleString()}/MT` });
 
   return (
@@ -126,7 +126,8 @@ export default function DashboardView({ data, onGoto }: { data: DashboardData; o
             </div>
             <div className="bg-background/50 rounded-md border border-border/70 p-3 text-xs text-muted-foreground">{detail.action}</div>
             <div className="flex gap-2">
-              <button onClick={() => { setDetail(null); onGoto?.('inventory'); }} className="px-3 py-1.5 bg-muted hover:bg-accent border border-border/80 rounded-md text-xs font-medium">Inventory forecast</button>
+              <button onClick={() => { setDetail(null); onGoto?.('inventory', detail.node ? { node: detail.node } : undefined); }} className="px-3 py-1.5 bg-muted hover:bg-accent border border-border/80 rounded-md text-xs font-medium">Inventory forecast</button>
+              <button onClick={() => { setDetail(null); onGoto?.('tanks', detail.node ? { node: detail.node } : undefined); }} className="px-3 py-1.5 bg-muted hover:bg-accent border border-border/80 rounded-md text-xs font-medium">Tank farm</button>
               <button onClick={() => { setDetail(null); onGoto?.('scheduler'); }} className="px-3 py-1.5 bg-primary hover:bg-primary/90 text-primary-foreground rounded-md text-xs font-medium">Operational plan</button>
             </div>
           </div>

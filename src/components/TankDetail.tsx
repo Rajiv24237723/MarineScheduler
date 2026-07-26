@@ -1,4 +1,4 @@
-﻿import { DashboardData, Tank } from '../types';
+﻿import { DashboardData, Tank, Focus } from '../types';
 import { TankGauge } from '@/components/ui/TankGauge';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
 import { format, addDays } from 'date-fns';
@@ -7,7 +7,7 @@ const START = new Date('2026-07-01T00:00:00Z');
 
 /** Shared tank-detail body: large gauge, metrics, projection sparkline, incoming
  *  parcels. Used by the Tank Farm grid and the Inventory Forecast at-risk list. */
-export function TankDetail({ tank, data }: { tank: Tank; data: DashboardData }) {
+export function TankDetail({ tank, data, onNavigate }: { tank: Tank; data: DashboardData; onNavigate?: (tab: string, focus?: Focus) => void }) {
   const prod = (id: string) => data.products.find(p => p.id === id);
   const p = prod(tank.productId);
   const inc = (data.voyages ?? []).flatMap(v => v.stops.filter(s => s.locationId === tank.locationId)
@@ -77,6 +77,13 @@ export function TankDetail({ tank, data }: { tank: Tank; data: DashboardData }) 
               ))}
           </div>
         </div>
+        {onNavigate && (
+          <div className="flex flex-wrap gap-2 pt-1 border-t border-border/50 mt-1">
+            <button onClick={() => onNavigate('inventory', { node: { loc: tank.locationId, product: tank.productId } })} className="text-[11px] px-2.5 py-1 rounded-md bg-muted hover:bg-accent border border-border/70 text-foreground/80 hover:text-cyan-300">Network forecast →</button>
+            <button onClick={() => onNavigate('tanks', { tankId: tank.id })} className="text-[11px] px-2.5 py-1 rounded-md bg-muted hover:bg-accent border border-border/70 text-foreground/80 hover:text-cyan-300">Tank farm →</button>
+            <button onClick={() => onNavigate('scheduler')} className="text-[11px] px-2.5 py-1 rounded-md bg-muted hover:bg-accent border border-border/70 text-foreground/80 hover:text-cyan-300">Voyages →</button>
+          </div>
+        )}
       </div>
     </div>
   );

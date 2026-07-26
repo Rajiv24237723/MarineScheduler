@@ -1,5 +1,5 @@
-﻿import { useState, useMemo } from 'react';
-import { DashboardData, Tank } from '../types';
+﻿import { useState, useMemo, useEffect } from 'react';
+import { DashboardData, Tank, Goto, Focus } from '../types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Modal } from '@/components/ui/modal';
 import { TankDetail } from './TankDetail';
@@ -8,10 +8,12 @@ import { format, addDays } from 'date-fns';
 
 const START = new Date('2026-07-01T00:00:00Z');
 
-export default function InventoryView({ data }: { data: DashboardData }) {
+export default function InventoryView({ data, goto, focus }: { data: DashboardData; goto?: Goto; focus?: Focus }) {
   const projections = data.projection ?? [];
   const [key, setKey] = useState<string>(projections[0] ? `${projections[0].locationId}|${projections[0].productId}` : '');
   const [openTank, setOpenTank] = useState<Tank | null>(null);
+  // Land focused on a node when navigated here from another card.
+  useEffect(() => { if (focus?.node) setKey(`${focus.node.loc}|${focus.node.product}`); }, [focus]);
   const tankFor = (loc: string, pid: string) => data.tanks.find(t => t.locationId === loc && t.productId === pid) ?? null;
   const sel = projections.find(p => `${p.locationId}|${p.productId}` === key) ?? projections[0];
 
@@ -77,7 +79,7 @@ export default function InventoryView({ data }: { data: DashboardData }) {
       <Modal open={!!openTank} onClose={() => setOpenTank(null)}
         title={openTank ? `${openTank.name} — ${data.products.find(p => p.id === openTank.productId)?.name}` : ''}
         subtitle={openTank ? data.locations.find(l => l.id === openTank.locationId)?.name : ''} width="max-w-3xl">
-        {openTank && <TankDetail tank={openTank} data={data} />}
+        {openTank && <TankDetail tank={openTank} data={data} onNavigate={(tab, f) => { setOpenTank(null); goto?.(tab, f); }} />}
       </Modal>
     </div>
   );
