@@ -17,6 +17,7 @@ export function search(input: EngineInput): SearchResult {
   const seed = input.options?.seed ?? 20260724;
 
   let best: SearchResult | null = null;
+  let noImprove = 0;
   for (let k = 0; k < attempts; k++) {
     const inv = new InventoryModel(input);
     const rand = k === 0 ? () => 0.5 : rng(seed + k * 7919);
@@ -24,10 +25,10 @@ export function search(input: EngineInput): SearchResult {
     const cost = out.voyages.reduce((s, v) => s + v.cost, 0);
     const unservedMt = out.unserved.reduce((s, u) => s + u.shortfallMt, 0);
     const better = !best || unservedMt < best.unservedMt || (unservedMt === best.unservedMt && cost < best.cost);
-    if (better) best = { out, inv, cost, unservedMt };
-    // Feasibility is the priority — once a plan serves all demand, take it and stop
-    // (do a couple of extra passes first for a little cost improvement).
-    if (best.unservedMt === 0 && k >= 2) break;
+    if (better) { best = { out, inv, cost, unservedMt }; noImprove = 0; } else noImprove++;
+    // Feasibility first; then keep exploring the multi-start for lower cost until it stops
+    // improving for several consecutive passes (deeper than taking the first feasible plan).
+    if (best.unservedMt === 0 && noImprove >= 4) break;
   }
   return best!;
 }

@@ -1,6 +1,6 @@
 /** Domain + solve I/O types for the operational MIRP engine (Model B). */
 
-export interface Product { id: string; stream: string; name: string; type: string; color: string; cargoClass: string; }
+export interface Product { id: string; stream: string; name: string; type: string; color: string; cargoClass: string; density?: number | null; }
 export interface Location { id: string; stream: string; name: string; type: string; lat: number; lng: number; }
 
 export interface Compartment { id: string; cap: number; }

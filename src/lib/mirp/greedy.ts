@@ -56,10 +56,20 @@ export function runGreedy(input: EngineInput, inv: InventoryModel, rand: () => n
     return imm;
   };
 
+  // Volumetric stowage: a fixed-volume tank holds different MT by grade density, capped by
+  // its weight rating. Effective MT ≈ cap · min(1, ρ/refρ) — light grades fill less by weight,
+  // heavy grades are weight-limited. Applied within POL (grades share tanks); ~1 for crude/LNG.
+  const densityOf = new Map(input.products.map(p => [p.id, p.density ?? null]));
+  const refDensity = input.stream === 'CRUDE' ? 860 : input.stream === 'LNG' ? 450 : 850;
+  const capOf = (cap: number, pid: string) => { const d = densityOf.get(pid); return d ? Math.max(1, Math.round(cap * Math.min(1, d / refDensity))) : cap; };
+  // LNG boils off in transit (~0.12 %/day); load extra to cover the loss to the tank.
+  const boilOffRate = (pid: string) => (classOf.get(pid) === 'LNG' ? 0.0012 : 0);
+  const SPEED_FLOOR = 0.85; // slow-steaming: min fraction of service speed (gentle, preserves throughput)
+
   const vstates = new Map<string, VesselState>();
-  // Vessels start at coastal ports (terminals/sources/SPMs), never at an inland
-  // refinery, and are distributed round-robin so day-0 positions are realistic.
-  const homePorts = input.locations.filter(l => l.type !== 'REFINERY').map(l => l.id);
+  // Day-0 positions: distribute vessels round-robin over all network ports (loading points
+  // included) so some start at a source and open with a laden pickup rather than long ballast.
+  const homePorts = input.locations.map(l => l.id);
   const fallback = input.locations[0]?.id;
   const allVessels = [...owned, ...spot];
   allVessels.forEach((v, i) => vstates.set(v.id, { v, locId: (homePorts.length ? homePorts[i % homePorts.length] : fallback), freeDay: 0, compHist: {} }));
@@ -213,41 +223,66 @@ export function runGreedy(input: EngineInput, inv: InventoryModel, rand: () => n
       .filter(x => x.day !== null)
       .sort((a, b) => a.day! - b.day!)) queue.push({ need: o.nd, deadline: o.day! });
 
-    // Serve one product to its most urgent destinations from a single source: pool free
-    // compartments to hold the total (a parcel across many tanks), split across destinations.
+    // Serve one product to its most urgent destinations: pool free compartments (a parcel
+    // spans several tanks), picking up from one or more sources, split across destinations.
     const serveProduct = (productId: string): boolean => {
       if (servedProducts.has(productId)) return false;
       const dests = queue.filter(q => q.need.productId === productId).slice(0, MAX_DROPS);
       if (!dests.length) return false;
-      const src = nearestSource(productId, vs.locId, Math.min(...dests.map(d => d.deadline)));
-      if (!src) return false;
-      const loadDayEst = Math.min(inv.horizon, vs.freeDay + sailDays(dist(vs.locId, src), vs.v.speed));
-      const freeComps = vs.v.compartments.filter(c => !usedComps.has(c.id) && canLoad(vs.compHist[c.id], productId).allowed);
+      const minDeadline = Math.min(...dests.map(d => d.deadline));
+      // Sources with surplus, nearest first (multi-pickup fills across more than one if needed).
+      const srcs = input.tanks
+        .filter(t => t.productId === productId && inv.node(t.locationId, productId) && inv.node(t.locationId, productId)!.netDaily >= 0 && inv.firstDryOut(t.locationId, productId) === null)
+        .map(t => t.locationId)
+        .filter(loc => inv.availableAt(loc, productId, Math.max(0, minDeadline)) >= MIN_PARCEL)
+        .sort((a, b) => dist(vs.locId, a) * jf(a) - dist(vs.locId, b) * jf(b));
+      if (!srcs.length) return false;
+      const loadDayEst = Math.min(inv.horizon, vs.freeDay + sailDays(dist(vs.locId, srcs[0]), vs.v.speed));
+      // Free compatible tanks, ordered to minimise changeover (a tank last holding this grade
+      // needs none; otherwise cheapest transition first).
+      const freeComps = vs.v.compartments
+        .filter(c => !usedComps.has(c.id) && canLoad(vs.compHist[c.id], productId).allowed)
+        .sort((a, b) => transition(lastOf(vs.compHist[a.id]), productId).cost - transition(lastOf(vs.compHist[b.id]), productId).cost);
       if (!freeComps.length) return false;
-      const freeCap = freeComps.reduce((s, c) => s + c.cap, 0);
-      const avail = inv.minAvailableFrom(src, productId, loadDayEst);
+      const effFreeCap = freeComps.reduce((s, c) => s + capOf(c.cap, productId), 0);
+      const totalAvail = srcs.reduce((s, loc) => s + inv.minAvailableFrom(loc, productId, loadDayEst), 0);
       const want = dests.map(d => {
-        const arr = Math.min(inv.horizon, loadDayEst + 1 + sailDays(dist(src, d.need.locId), vs.v.speed));
+        const arr = Math.min(inv.horizon, loadDayEst + 1 + sailDays(dist(srcs[0], d.need.locId), vs.v.speed));
         return { loc: d.need.locId, deadline: d.deadline, q: Math.max(0, inv.minUllageFrom(d.need.locId, productId, arr)) };
       }).filter(x => x.q >= 1);
       const totalWant = want.reduce((s, x) => s + x.q, 0);
-      const allowed = Math.min(totalWant, avail, freeCap);
-      if (allowed < MIN_PARCEL) return false;
-      const scale = allowed / totalWant;
+      if (totalWant < 1) return false;
+      // Boil-off (LNG): load a little extra so the tank still receives its full parcel.
+      const loadFactor = 1 + boilOffRate(productId) * Math.max(1, sailDays(dist(srcs[0], want[0].loc), vs.v.speed));
+      const deliverBudget = Math.min(totalWant, totalAvail / loadFactor, effFreeCap / loadFactor);
+      if (deliverBudget < MIN_PARCEL) return false;
+      const scale = deliverBudget / totalWant;
       const scaled = want.map(x => ({ loc: x.loc, deadline: x.deadline, q: Math.floor(x.q * scale) })).filter(x => x.q >= MIN_PARCEL);
       if (!scaled.length) return false;
-      const deliverTotal = scaled.reduce((s, x) => s + x.q, 0);
-      // Allocate compartments (a parcel may span several) to hold exactly the delivered total.
-      let remaining = deliverTotal;
-      for (const c of freeComps) {
-        if (remaining <= 0) break;
-        const take = Math.min(c.cap, remaining);
-        if (take < 1) continue;
-        stows.push({ compartmentId: c.id, productId, sourceLoc: src, qty: Math.round(take) });
-        usedComps.add(c.id);
-        remaining -= take;
+      const loadTotal = Math.round(scaled.reduce((s, x) => s + x.q, 0) * loadFactor);
+      // Allocate compartments across sources (nearest first); a parcel may span several tanks.
+      const newStows: Stow[] = [];
+      let toLoad = loadTotal, ci = 0;
+      for (const src of srcs) {
+        if (toLoad <= 0 || ci >= freeComps.length) break;
+        let srcAvail = inv.minAvailableFrom(src, productId, loadDayEst);
+        while (toLoad > 0 && ci < freeComps.length && srcAvail >= 1) {
+          const eff = capOf(freeComps[ci].cap, productId);
+          const take = Math.min(eff, toLoad, srcAvail);
+          if (take < 1) break;
+          newStows.push({ compartmentId: freeComps[ci].id, productId, sourceLoc: src, qty: Math.round(take) });
+          toLoad -= take; srcAvail -= take; ci++;
+        }
       }
-      for (const x of scaled) deliveries.push({ destLoc: x.loc, productId, qty: x.q, deadline: x.deadline });
+      const loadedTotal = newStows.reduce((s, x) => s + x.qty, 0);
+      if (loadedTotal < MIN_PARCEL) return false;
+      // Delivered = loaded, discounted by boil-off; trim destinations to fit.
+      let deliverable = Math.floor(loadedTotal / loadFactor);
+      const finalDeliv: { loc: string; qty: number; deadline: number }[] = [];
+      for (const x of scaled) { const q = Math.min(x.q, deliverable); if (q >= MIN_PARCEL) { finalDeliv.push({ loc: x.loc, qty: q, deadline: x.deadline }); deliverable -= q; } }
+      if (!finalDeliv.length) return false;
+      for (const s of newStows) { stows.push(s); usedComps.add(s.compartmentId); }
+      for (const x of finalDeliv) deliveries.push({ destLoc: x.loc, productId, qty: x.qty, deadline: x.deadline });
       servedProducts.add(productId);
       return true;
     };
@@ -315,76 +350,114 @@ export function runGreedy(input: EngineInput, inv: InventoryModel, rand: () => n
     return byDest;
   }
 
-  // Route timeline: ballast → load stops (by source) → discharge stops (by destination) → empty.
+  // Route timeline: an interleaved pickup-and-delivery route (a drop is eligible once every
+  // source feeding its cargo is visited), sailed at a slow-steamed speed that just meets the
+  // tightest deadline, with load-dependent draft (part-laden calls at shallow ports allowed)
+  // and tank-changeover time charged on loading.
   function timeline(vs: VesselState, stows: Stow[], deliveries: Delivery[]) {
-    const loadLocs = uniqueOrderNearest(vs.locId, [...new Set(stows.map(s => s.sourceLoc))]);
-    const dischLocs = uniqueOrderNearest(loadLocs[loadLocs.length - 1] ?? vs.locId, [...new Set(deliveries.map(d => d.destLoc))]);
-
-    // Draft feasibility: every visited port must admit the laden vessel.
-    for (const loc of [...loadLocs, ...dischLocs]) {
-      const bs = berthsByLoc.get(loc);
-      if (bs && bs.length && !bs.some(b => b.maxDraft >= vs.v.draftLaden)) return null;
-    }
     const dischByDest = distribute(stows, deliveries);
+    const sources = [...new Set(stows.map(s => s.sourceLoc))];
+    const dests = [...new Set(deliveries.map(d => d.destLoc))];
 
-    const stops: Stop[] = [];
-    const legs: Leg[] = [];
-    const breakdown: CostBreakdown = { bunker: 0, freight: 0, portDA: 0, demurrage: 0, changeover: 0 };
-    const berthAdds = new Map<string, number>();
-    const loadDepartDay = new Map<string, number>();
-    const dischargeArriveDay = new Map<string, number>();
-
-    let cur = vs.locId; let day = vs.freeDay; let seq = 0; let invOk = true;
     const rate = (loc: string) => (berthsByLoc.get(loc)?.[0]?.rateMtPerHr ?? 2000);
     const berthingH = (loc: string) => (berthsByLoc.get(loc)?.[0]?.berthingHours ?? 12);
     const nsim = (loc: string) => (berthsByLoc.get(loc)?.[0]?.nsim ?? 99);
 
-    const hop = (to: string, ballast: boolean) => {
+    // Per-stop ops, and load-stop tank-cleaning/changeover hours (pre-voyage tank history).
+    const loadOps = new Map<string, Op[]>(); const loadChangeH = new Map<string, number>();
+    for (const src of sources) {
+      const here = stows.filter(s => s.sourceLoc === src);
+      loadOps.set(src, here.map(s => ({ op: 'LOAD' as const, productId: s.productId, qty: s.qty, compartmentId: s.compartmentId })));
+      loadChangeH.set(src, here.reduce((h, s) => h + transition(lastOf(vs.compHist[s.compartmentId]), s.productId).hours, 0));
+    }
+    const opsAt = (loc: string, kind: 'LOAD' | 'DISCHARGE') => (kind === 'LOAD' ? loadOps.get(loc)! : (dischByDest.get(loc) ?? []));
+    const qtyAt = (loc: string, kind: 'LOAD' | 'DISCHARGE') => opsAt(loc, kind).reduce((s, o) => s + o.qty, 0);
+    const opDaysAt = (loc: string, kind: 'LOAD' | 'DISCHARGE') =>
+      Math.max(1, Math.ceil((berthingH(loc) + (kind === 'LOAD' ? (loadChangeH.get(loc) ?? 0) : 0) + qtyAt(loc, kind) / rate(loc)) / 24));
+    const deadlineAt = (dest: string) => Math.min(...deliveries.filter(d => d.destLoc === dest).map(d => d.deadline));
+
+    // Pickup→delivery precedence: a destination depends on every source of the grades it receives.
+    const prodSources = new Map<string, Set<string>>();
+    for (const s of stows) { if (!prodSources.has(s.productId)) prodSources.set(s.productId, new Set()); prodSources.get(s.productId)!.add(s.sourceLoc); }
+    const destDeps = (dest: string) => { const set = new Set<string>(); for (const d of deliveries.filter(x => x.destLoc === dest)) for (const src of (prodSources.get(d.productId) ?? [])) set.add(src); return [...set]; };
+
+    // Interleaved nearest-neighbour route.
+    const route: { loc: string; kind: 'LOAD' | 'DISCHARGE' }[] = [];
+    const pendingL = new Set(sources), pendingD = new Set(dests), visited = new Set<string>();
+    let rcur = vs.locId;
+    while (pendingL.size || pendingD.size) {
+      const cand: { loc: string; kind: 'LOAD' | 'DISCHARGE' }[] = [];
+      for (const s of pendingL) cand.push({ loc: s, kind: 'LOAD' });
+      for (const d of pendingD) if (destDeps(d).every(src => visited.has(src))) cand.push({ loc: d, kind: 'DISCHARGE' });
+      if (!cand.length) break;
+      cand.sort((a, b) => dist(rcur, a.loc) * jf(a.loc) - dist(rcur, b.loc) * jf(b.loc));
+      const pick = cand[0]; route.push(pick); rcur = pick.loc;
+      if (pick.kind === 'LOAD') { visited.add(pick.loc); pendingL.delete(pick.loc); } else pendingD.delete(pick.loc);
+    }
+
+    // Slow-steaming: one voyage speed that just meets the tightest deadline, bounded below.
+    const totalCap = Math.max(1, vs.v.compartments.reduce((s, c) => s + c.cap, 0));
+    const draftAt = (aboard: number) => vs.v.draftBallast + (vs.v.draftLaden - vs.v.draftBallast) * Math.min(1, Math.max(0, aboard) / totalCap);
+    let simDist = 0, simPort = 0, simCur = vs.locId; const reqSpeeds: number[] = [];
+    for (const node of route) {
+      simDist += dist(simCur, node.loc); simCur = node.loc;
+      if (node.kind === 'DISCHARGE') { const availDays = deadlineAt(node.loc) - vs.freeDay - simPort; if (availDays >= 1) reqSpeeds.push(simDist / (availDays * 24)); }
+      simPort += opDaysAt(node.loc, node.kind);
+    }
+    const svc = Math.max(1, vs.v.speed);
+    const effSpeed = Math.min(svc, Math.max(svc * SPEED_FLOOR, reqSpeeds.length ? Math.max(...reqSpeeds) : svc * SPEED_FLOOR));
+
+    const stops: Stop[] = []; const legs: Leg[] = [];
+    const breakdown: CostBreakdown = { bunker: 0, freight: 0, portDA: 0, demurrage: 0, changeover: 0 };
+    const berthAdds = new Map<string, number>();
+    const loadDepartDay = new Map<string, number>();
+    const dischargeArriveDay = new Map<string, number>();
+    let cur = vs.locId; let day = vs.freeDay; let seq = 0; let invOk = true; let aboard = 0;
+    let sailEco = 0, sailNom = 0; // eco (actual) vs service-speed sail days
+    const startDay = day;
+
+    const hop = (to: string) => {
       if (to === cur) return;
-      const d = dist(cur, to); const sd = sailDays(d, vs.v.speed);
-      legs.push({ fromLoc: cur, toLoc: to, departDay: day, arriveDay: day + sd, ballast, distanceNm: Math.round(d) });
-      breakdown.bunker += dailyBunkerMt(vs.v.speed) * sd * BUNKER_USD_PER_MT * INR;
+      const d = dist(cur, to); const sd = sailDays(d, effSpeed);
+      legs.push({ fromLoc: cur, toLoc: to, departDay: day, arriveDay: day + sd, ballast: aboard <= 0, distanceNm: Math.round(d) });
+      breakdown.bunker += dailyBunkerMt(effSpeed) * sd * BUNKER_USD_PER_MT * INR;
+      sailEco += sd; sailNom += sailDays(d, svc);
       day += sd; cur = to;
     };
 
-    // A load or discharge call: sail there, check inventory feasibility at the op day, cost it.
-    const portStop = (loc: string, kind: 'LOAD' | 'DISCHARGE', ballastLeg: boolean, ops: Op[]) => {
-      hop(loc, ballastLeg);
-      const qtyTot = ops.reduce((s, o) => s + o.qty, 0);
-      const opDays = Math.max(1, Math.ceil((berthingH(loc) + qtyTot / rate(loc)) / 24));
+    for (const node of route) {
+      const loc = node.loc, kind = node.kind, ops = opsAt(loc, kind), q = qtyAt(loc, kind);
+      // Load-dependent draft: the port must admit the vessel at its draft while alongside
+      // (after loading for a pickup, on arrival for a drop) — part-laden reaches shallow ports.
+      const alongsideAboard = kind === 'LOAD' ? aboard + q : aboard;
+      const bs = berthsByLoc.get(loc);
+      if (bs && bs.length && !bs.some(b => b.maxDraft >= draftAt(alongsideAboard) - 1e-6)) return null;
+      hop(loc);
+      if (kind === 'LOAD') for (const o of ops) breakdown.changeover += transition(lastOf(vs.compHist[o.compartmentId]), o.productId).cost;
       const arriveDay = day;
       const byProd = new Map<string, number>();
       for (const o of ops) byProd.set(o.productId, (byProd.get(o.productId) ?? 0) + o.qty);
-      for (const [pid, q] of byProd) {
-        if (kind === 'LOAD' && inv.minAvailableFrom(loc, pid, arriveDay) + 1e-6 < q) invOk = false;
-        if (kind === 'DISCHARGE' && (inv.minUllageFrom(loc, pid, arriveDay) + 1e-6 < q || inv.outageOn(loc, pid, arriveDay))) invOk = false;
+      for (const [pid, qq] of byProd) {
+        if (kind === 'LOAD' && inv.minAvailableFrom(loc, pid, arriveDay) + 1e-6 < qq) invOk = false;
+        if (kind === 'DISCHARGE' && (inv.minUllageFrom(loc, pid, arriveDay) + 1e-6 < qq || inv.outageOn(loc, pid, arriveDay))) invOk = false;
       }
-      const key = `${loc}|${arriveDay}`;
-      const busy = (berthUsage.get(key) ?? 0) + (berthAdds.get(key) ?? 0);
-      if (busy >= nsim(loc)) breakdown.demurrage += DEM_USD_PER_DAY * INR;
+      const opDays = opDaysAt(loc, kind);
+      if (((berthUsage.get(`${loc}|${arriveDay}`) ?? 0) + (berthAdds.get(`${loc}|${arriveDay}`) ?? 0)) >= nsim(loc)) breakdown.demurrage += DEM_USD_PER_DAY * INR;
       breakdown.portDA += PORT_CALL_USD * INR;
       for (let k = 0; k < opDays; k++) { const kk = `${loc}|${arriveDay + k}`; berthAdds.set(kk, (berthAdds.get(kk) ?? 0) + 1); }
       day += opDays;
       stops.push({ seq: seq++, locationId: loc, arriveDay, departDay: day, kind, ops });
-      if (kind === 'LOAD') loadDepartDay.set(loc, arriveDay); else dischargeArriveDay.set(loc, arriveDay);
-    };
+      if (kind === 'LOAD') { aboard += q; loadDepartDay.set(loc, arriveDay); } else { aboard -= q; dischargeArriveDay.set(loc, arriveDay); }
+    }
 
-    const startDay = day;
-    loadLocs.forEach((loc, i) => {
-      const here = stows.filter(s => s.sourceLoc === loc);
-      const ops: Op[] = here.map(s => {
-        breakdown.changeover += transition(lastOf(vs.compHist[s.compartmentId]), s.productId).cost;
-        return { op: 'LOAD' as const, productId: s.productId, qty: s.qty, compartmentId: s.compartmentId };
-      });
-      portStop(loc, 'LOAD', i === 0, ops);            // first leg is ballast to first source
-    });
-    dischLocs.forEach(loc => portStop(loc, 'DISCHARGE', false, dischByDest.get(loc) ?? []));
-
-    // Freight: SPOT = voyageRate·qty; OWNED/TC/COA = daily hire × voyage days.
-    const voyDays = Math.max(1, day - startDay);
+    // Freight: SPOT = voyageRate·qty; OWNED/TC/COA = daily hire × voyage days. Hire is a sunk
+    // period cost, so it is charged on nominal (service-speed) days — slow-steaming saves
+    // bunker without being penalised as extra hire.
+    const portDays = Math.max(0, (day - startDay) - sailEco);
+    const nominalVoyDays = Math.max(1, sailNom + portDays);
     const totQty = deliveries.reduce((s, d) => s + d.qty, 0);
     if (vs.v.pool === 'SPOT') breakdown.freight += vs.v.voyageRate * totQty * INR;
-    else breakdown.freight += (vs.v.charterCost || 15000) * voyDays * INR;
+    else breakdown.freight += (vs.v.charterCost || 15000) * nominalVoyDays * INR;
 
     const cost = breakdown.bunker + breakdown.freight + breakdown.portDA + breakdown.demurrage + breakdown.changeover;
     const deadlinesOk = deliveries.every(d => (dischargeArriveDay.get(d.destLoc) ?? Infinity) <= d.deadline);
@@ -399,12 +472,6 @@ export function runGreedy(input: EngineInput, inv: InventoryModel, rand: () => n
       .filter(loc => inv.availableAt(loc, p, Math.max(0, byDay)) >= MIN_PARCEL);
     if (srcs.length === 0) return null;
     return srcs.sort((a, b) => dist(from, a) * jf(a) - dist(from, b) * jf(b))[0];
-  }
-
-  function uniqueOrderNearest(from: string, locs: string[]): string[] {
-    const out: string[] = []; let cur = from; const rem = [...locs];
-    while (rem.length) { rem.sort((a, b) => dist(cur, a) * jf(a) - dist(cur, b) * jf(b)); const n = rem.shift()!; out.push(n); cur = n; }
-    return out;
   }
 }
 
