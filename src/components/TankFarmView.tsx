@@ -32,15 +32,47 @@ export default function TankFarmView({ data }: { data: DashboardData }) {
   const incFor = (t: Tank) => incoming.get(`${t.locationId}|${t.productId}`) ?? [];
   const proj = (t: Tank) => data.projection?.find(p => p.locationId === t.locationId && p.productId === t.productId);
 
+  // Network inventory rollup across every tank in the stream.
+  const agg = useMemo(() => {
+    let inv = 0, cap = 0, mn = 0;
+    for (const t of data.tanks) { inv += t.currentStock; cap += t.capacity; mn += t.minStock; }
+    return {
+      tanks: data.tanks.length, inv, cap,
+      ullage: Math.max(0, cap - inv), avail: Math.max(0, inv - mn),
+      fillPct: Math.round((inv / Math.max(1, cap)) * 100),
+      dry: (data.projection ?? []).filter(p => p.firstDryOutDay != null).length,
+      top: (data.projection ?? []).filter(p => p.firstTankTopDay != null).length,
+    };
+  }, [data.tanks, data.projection]);
+  const kt = (n: number) => n >= 1e6 ? `${(n / 1e6).toFixed(2)}M` : `${Math.round(n / 1000)}k`;
+
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between">
-        <h3 className="text-lg font-semibold text-foreground">Tank Farm — live inventory</h3>
+        <h3 className="font-serif text-2xl font-medium text-foreground">Tank Farm — live inventory</h3>
         <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
           <span className="flex items-center gap-1"><span className="w-3 border-t-2 border-dashed border-bad" /> dry-out floor</span>
           <span className="flex items-center gap-1"><span className="w-3 border-t-2 border-dashed border-warn" /> tank-top</span>
           <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-md bg-cyan-400/30" /> incoming</span>
         </div>
+      </div>
+
+      {/* Network inventory rollup */}
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-px bg-border/40 rounded-md border border-border/70 overflow-hidden">
+        {[
+          ['Tanks', String(agg.tanks), ''],
+          ['Inventory', `${kt(agg.inv)} MT`, ''],
+          ['Ullage', `${kt(agg.ullage)} MT`, 'text-cyan-300'],
+          ['Available', `${kt(agg.avail)} MT`, 'text-ok'],
+          ['Fill', `${agg.fillPct}%`, ''],
+          ['Dry-out risk', String(agg.dry), agg.dry > 0 ? 'text-bad' : 'text-ok'],
+          ['Tank-top risk', String(agg.top), agg.top > 0 ? 'text-warn' : 'text-ok'],
+        ].map(([label, val, tone]) => (
+          <div key={label} className="bg-card px-3.5 py-3">
+            <div className="font-cond text-[9px] uppercase tracking-[0.14em] text-muted-foreground">{label}</div>
+            <div className={`text-2xl font-serif mt-1 tabular-nums ${tone || 'text-foreground'}`}>{val}</div>
+          </div>
+        ))}
       </div>
 
       {[...byLoc.entries()].map(([locId, tanks]) => (
@@ -60,6 +92,7 @@ export default function TankFarmView({ data }: { data: DashboardData }) {
                   <div className="mt-1 text-center">
                     <div className="text-[11px] font-mono text-foreground/90 group-hover:text-cyan-300">{t.name}</div>
                     <div className="text-[9px] text-muted-foreground">{p?.name} · {Math.round(t.currentStock / 1000)}k / {Math.round(t.capacity / 1000)}k</div>
+                    <div className="text-[9px] text-muted-foreground/75"><span className="text-cyan-400/80">ull</span> {Math.round((t.capacity - t.currentStock) / 1000)}k · <span className="text-ok/90">avl</span> {Math.round(Math.max(0, t.currentStock - t.minStock) / 1000)}k</div>
                     {(dryRisk || topRisk) && <div className={`mt-0.5 text-[8px] px-1 py-0.5 rounded-md ${dryRisk ? 'bg-bad/15 text-bad' : 'bg-warn/15 text-warn'}`}>{dryRisk ? 'DRY-OUT RISK' : 'TANK-TOP RISK'}</div>}
                   </div>
                 </button>
