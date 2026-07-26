@@ -10,8 +10,9 @@ const fmtM = (n: number) => `₹${(n / 1e6).toFixed(1)}M`;
 type Col = { key: string; label: string; num?: boolean };
 const TABS: Record<string, { table: string; cols: Col[]; rows: (d: DashboardData) => any[]; make: (stream: string, d: DashboardData) => any; note?: string }> = {
   Products: {
-    table: 'products', cols: [{ key: 'id', label: 'ID' }, { key: 'name', label: 'Name' }, { key: 'type', label: 'Type' }, { key: 'cargoClass', label: 'Cargo class' }, { key: 'color', label: 'Colour' }],
-    rows: d => d.products, make: (s) => ({ id: `p_${Date.now() % 100000}`, stream: s, name: 'New Grade', type: s, cargoClass: 'CLEAN', color: '#8b5cf6' }),
+    table: 'products', note: 'Grade specifications are illustrative planning values, not IOCL assay sheets.',
+    cols: [{ key: 'id', label: 'ID' }, { key: 'name', label: 'Name' }, { key: 'cargoClass', label: 'Cargo class' }, { key: 'rating', label: 'Rating' }, { key: 'density', label: 'Density kg/m³', num: true }, { key: 'flashPoint', label: 'Flash °C', num: true }, { key: 'pourPoint', label: 'Pour °C', num: true }, { key: 'sulphur', label: 'Sulphur' }, { key: 'parcelMin', label: 'Parcel min t', num: true }, { key: 'parcelMax', label: 'Parcel max t', num: true }, { key: 'color', label: 'Colour' }],
+    rows: d => d.products, make: (s) => ({ id: `p_${Date.now() % 100000}`, stream: s, name: 'New Grade', type: s, cargoClass: 'CLEAN', color: '#8b5cf6', density: 800, flashPoint: 40, pourPoint: null, sulphur: '10 ppm', rating: '—', parcelMin: 2000, parcelMax: 20000 }),
   },
   Locations: {
     table: 'locations', cols: [{ key: 'id', label: 'ID' }, { key: 'name', label: 'Name' }, { key: 'type', label: 'Type' }, { key: 'lat', label: 'Lat', num: true }, { key: 'lng', label: 'Lng', num: true }],

@@ -11,7 +11,15 @@ export const products = sqliteTable('products', {
   name: text('name').notNull(),
   type: text('type').notNull(),
   color: text('color').notNull(), // UI colour for Gantt / charts
-  cargoClass: text('cargo_class').notNull().default('CLEAN'), // CLEAN (white oil) | BLACK (FO/residual) | CRUDE | LNG
+  cargoClass: text('cargo_class').notNull().default('CLEAN'), // CLEAN (white oil) | BLACK (FO/residual) | BITUMEN | CRUDE | LNG
+  // Grade specification (illustrative planning values). flash/pour null = below ambient / n.a.
+  density: real('density'),          // kg/m³ at 15 °C
+  flashPoint: real('flash_point'),   // °C
+  pourPoint: real('pour_point'),     // °C
+  sulphur: text('sulphur'),          // e.g. "10 ppm", "0.50%"
+  rating: text('rating'),            // e.g. "91 RON", "51 CN", "VG30", "Jet A-1"
+  parcelMin: real('parcel_min'),     // typical parcel size band, MT
+  parcelMax: real('parcel_max'),
 });
 
 export const locations = sqliteTable('locations', {

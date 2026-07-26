@@ -1,6 +1,10 @@
 // Frontend types mirroring the /api/dashboard + /api/optimize payloads.
 
-export interface Product { id: string; stream: string; name: string; type: string; color: string; cargoClass: string; }
+export interface Product {
+  id: string; stream: string; name: string; type: string; color: string; cargoClass: string;
+  density?: number | null; flashPoint?: number | null; pourPoint?: number | null;
+  sulphur?: string | null; rating?: string | null; parcelMin?: number | null; parcelMax?: number | null;
+}
 export interface Location { id: string; stream: string; name: string; type: string; lat: number; lng: number; }
 export interface Vessel {
   id: string; stream: string; name: string; class: string; dwt: number;
