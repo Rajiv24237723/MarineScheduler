@@ -3,6 +3,7 @@ import { DashboardData, Voyage } from '../types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Modal } from '@/components/ui/modal';
 import { Pennant } from '@/components/ui/SignalFlag';
+import { Tip, TipRows } from '@/components/ui/tooltip';
 import { VoyageDetail } from './VoyageDetail';
 import { format, addDays } from 'date-fns';
 
@@ -41,17 +42,19 @@ export default function SchedulerView({ data, onOptimize, optimizing }: { data: 
 
       {hasPlan && (
       <div className="grid grid-cols-2 md:grid-cols-5 gap-px bg-border/40 rounded-md border border-border/70 overflow-hidden">
-        {[
-          ['Total cost', fmtM(k.totalCost)],
-          ['Voyages', String(k.voyageCount)],
-          ['Charter recs', String(k.charterRecommendationCount)],
-          ['Fleet util', `${k.utilizationPct}%`],
-          ['Demurrage', fmtM(k.demurrage)],
-        ].map(([label, val]) => (
-          <div key={label} className="bg-card px-3.5 py-3">
-            <div className="font-cond text-[9px] uppercase tracking-[0.14em] text-muted-foreground">{label}</div>
-            <div className="text-2xl font-serif text-foreground mt-1 tabular-nums">{val}</div>
-          </div>
+        {([
+          ['Total cost', fmtM(k.totalCost), 'Bunker + freight/hire + port DA + demurrage + tank changeover across every voyage.'],
+          ['Voyages', String(k.voyageCount), 'Distinct vessel voyages in the active plan (ballast → load(s) → discharge(s) → empty).'],
+          ['Charter recs', String(k.charterRecommendationCount), 'Spot voyages advised where the owned/TC/COA fleet cannot cover a lift in time.'],
+          ['Fleet util', `${k.utilizationPct}%`, 'Share of the owned, time-charter and COA fleet put to work this horizon.'],
+          ['Demurrage', fmtM(k.demurrage), 'Waiting cost incurred where a berth is congested beyond its simultaneous-vessel limit.'],
+        ] as [string, string, string][]).map(([label, val, tip]) => (
+          <Tip key={label} side="bottom" content={<div className="max-w-[15rem]"><div className="font-mono text-foreground/90 mb-1">{val}</div><div className="text-muted-foreground">{tip}</div></div>}>
+            <div className="bg-card px-3.5 py-3 cursor-help hover:bg-card/70 transition-colors">
+              <div className="font-cond text-[9px] uppercase tracking-[0.14em] text-muted-foreground">{label}</div>
+              <div className="text-2xl font-serif text-foreground mt-1 tabular-nums">{val}</div>
+            </div>
+          </Tip>
         ))}
       </div>
       )}
@@ -92,10 +95,12 @@ export default function SchedulerView({ data, onOptimize, optimizing }: { data: 
           <CardHeader className="py-2.5 px-4 border-b border-border/60"><CardTitle className="text-xs font-semibold text-foreground/80">Binding constraints (shadow prices)</CardTitle></CardHeader>
           <CardContent className="p-3 grid grid-cols-2 gap-2">
             {data.duals.map((d, i) => (
-              <div key={i} className="flex justify-between bg-background/50 p-2 rounded-md border border-border/80 text-xs">
-                <span className="text-foreground/80">{d.constraint}</span>
-                <span className="font-mono text-warn">+₹{d.shadowPrice.toLocaleString()}/MT</span>
-              </div>
+              <Tip key={i} content={<div className="max-w-xs"><div className="text-foreground/90 font-medium">{d.constraint}</div><div className="text-muted-foreground mt-0.5">Shadow price — this limit is binding: relaxing it by one MT would cut plan cost by about ₹{d.shadowPrice.toLocaleString()}.</div></div>}>
+                <div className="flex justify-between bg-background/50 p-2 rounded-md border border-border/80 text-xs cursor-help">
+                  <span className="text-foreground/80">{d.constraint}</span>
+                  <span className="font-mono text-warn">+₹{d.shadowPrice.toLocaleString()}/MT</span>
+                </div>
+              </Tip>
             ))}
           </CardContent>
         </Card>
@@ -116,18 +121,22 @@ export default function SchedulerView({ data, onOptimize, optimizing }: { data: 
           </div>
           {voyages.map(v => {
             const pcol = prod(primaryProduct(v) ?? '')?.color ?? '#64748b';
+            const mt = v.stops.flatMap(s => s.ops).filter(o => o.op === 'LOAD').reduce((a, o) => a + o.qty, 0);
             return (
               <div key={v.id} className="flex border-b border-border/60 hover:bg-muted/20 cursor-pointer" onClick={() => setModalVoyage(v)}>
-                <div className="w-44 p-2 border-r border-border/60 shrink-0">
-                  <div className="font-mono text-xs text-foreground/90 font-semibold">{v.vesselName}</div>
-                  <div className="text-[10px] text-muted-foreground/80">{v.vesselClass} · <span className={v.pool === 'SPOT' ? 'text-warn' : ''}>{v.pool}</span> · {fmtM(v.cost)}</div>
-                </div>
+                <Tip side="right" content={<TipRows title={v.vesselName} rows={[['Class', v.vesselClass], ['Charter', v.pool], ['MT loaded', `${Math.round(mt / 1000)}k`], ['Window', `${format(addDays(START, v.startDay), 'MMM d')}–${format(addDays(START, v.endDay), 'MMM d')}`], ['Stops', String(v.stops.length)], ['Cost', fmtM(v.cost)]]} />}>
+                  <div className="w-44 p-2 border-r border-border/60 shrink-0">
+                    <div className="font-mono text-xs text-foreground/90 font-semibold">{v.vesselName}</div>
+                    <div className="text-[10px] text-muted-foreground/80">{v.vesselClass} · <span className={v.pool === 'SPOT' ? 'text-warn' : ''}>{v.pool}</span> · {fmtM(v.cost)}</div>
+                  </div>
+                </Tip>
                 <div className="flex-1 relative min-h-[46px] py-2">
                   <div className="absolute top-1/2 -translate-y-1/2 h-3 rounded-full opacity-40" style={{ left: `${(v.startDay / maxDay) * 100}%`, width: `${Math.max(1, (v.endDay - v.startDay) / maxDay * 100)}%`, backgroundColor: pcol }} />
                   {v.stops.map(s => (
-                    <div key={s.seq} title={`${s.kind} @ ${loc(s.locationId)} (day ${s.arriveDay})`}
-                      className="absolute top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full border-2 border-background"
-                      style={{ left: `calc(${(s.arriveDay / maxDay) * 100}% - 5px)`, backgroundColor: s.kind === 'LOAD' ? 'var(--sea-sand)' : 'var(--sea-green)' }} />
+                    <Tip key={s.seq} content={<div className="max-w-xs"><div className="font-medium text-foreground/90">{s.kind} · {loc(s.locationId)}</div><div className="text-muted-foreground">{format(addDays(START, s.arriveDay), 'MMM d')}</div><div className="mt-1 space-y-0.5">{s.ops.map((o, oi) => <div key={oi} className="flex justify-between gap-3"><span className="text-muted-foreground">{prod(o.productId)?.name} → {o.compartmentId}</span><span className="font-mono text-foreground/90">{(o.qty / 1000).toFixed(1)}k</span></div>)}</div></div>}>
+                      <div className="absolute top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full border-2 border-background hover:scale-150 transition-transform"
+                        style={{ left: `calc(${(s.arriveDay / maxDay) * 100}% - 5px)`, backgroundColor: s.kind === 'LOAD' ? 'var(--sea-sand)' : 'var(--sea-green)' }} />
+                    </Tip>
                   ))}
                 </div>
               </div>

@@ -3,11 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, ReactNode } from 'react';
 import { Ship, LayoutDashboard, CalendarDays, Factory, Map as MapIcon, Settings, AlertTriangle, Database, TrendingUp, Bell } from 'lucide-react';
 import { DashboardData } from './types';
 import { Toaster, TopProgress, toast } from './components/ui/toast';
 import { StreamFlag, Pennant } from './components/ui/SignalFlag';
+import { TipProvider, Tip } from './components/ui/tooltip';
 import DashboardView from './components/DashboardView';
 import SchedulerView from './components/SchedulerView';
 import TankFarmView from './components/TankFarmView';
@@ -58,12 +59,15 @@ export default function App() {
 
   const alertCount = (data.unserved?.length ?? 0) + (data.kpis?.dryOutDays ?? 0) + (data.kpis?.tankTopDays ?? 0);
 
-  const readout = (label: string, value: string, tone = 'text-foreground') => (
-    <div className="px-4 border-l border-border/50 first:border-l-0 first:pl-0">
-      <div className="font-cond text-[9px] uppercase tracking-[0.16em] text-muted-foreground leading-none">{label}</div>
-      <div className={cn('text-sm font-semibold font-mono leading-tight mt-1', tone)}>{value}</div>
-    </div>
-  );
+  const readout = (label: string, value: string, tone = 'text-foreground', tip?: ReactNode) => {
+    const el = (
+      <div className={cn('px-4 border-l border-border/50 first:border-l-0 first:pl-0', tip && 'cursor-help')}>
+        <div className="font-cond text-[9px] uppercase tracking-[0.16em] text-muted-foreground leading-none">{label}</div>
+        <div className={cn('text-sm font-semibold font-mono leading-tight mt-1', tone)}>{value}</div>
+      </div>
+    );
+    return tip ? <Tip content={tip} side="bottom">{el}</Tip> : el;
+  };
 
   const activeVersion = data.versions?.find(v => v.status === 'Active');
 
@@ -106,6 +110,7 @@ export default function App() {
   const activeTabLabel = allTabs.find(t => t.id === activeTab)?.label || (activeTab === 'settings' ? 'Settings' : 'Command Center');
 
   return (
+    <TipProvider>
     <div className="flex h-screen w-full bg-background text-foreground overflow-hidden font-sans selection:bg-cyan-500/30">
       {/* Refined Sidebar */}
       <div className="w-64 border-r border-border/60 bg-card/80 backdrop-blur-md flex flex-col z-10 flex-shrink-0">
@@ -192,9 +197,9 @@ export default function App() {
             </div>
             <div className="h-8 w-px bg-border/70" />
             <div className="flex items-stretch">
-              {readout('Served', `${data.kpis?.demandServedPct ?? 0}%`, (data.kpis?.demandServedPct ?? 0) >= 100 ? 'text-ok' : 'text-warn')}
-              {readout('Voyages', String(data.kpis?.voyageCount ?? 0))}
-              {readout('Horizon', 'Jul–Aug')}
+              {readout('Served', `${data.kpis?.demandServedPct ?? 0}%`, (data.kpis?.demandServedPct ?? 0) >= 100 ? 'text-ok' : 'text-warn', `${data.kpis?.demandServedPct ?? 0}% of ${stream} horizon demand met${(data.unserved?.length ?? 0) ? ` · ${data.unserved.length} node(s) short` : ' · all nodes within limits'}`)}
+              {readout('Voyages', String(data.kpis?.voyageCount ?? 0), 'text-foreground', `${data.kpis?.voyageCount ?? 0} voyage(s) in the active ${stream} plan${data.kpis?.charterRecommendationCount ? ` · ${data.kpis.charterRecommendationCount} charter rec(s)` : ''}`)}
+              {readout('Horizon', 'Jul–Aug', 'text-foreground', 'Planning window: 1 Jul – 31 Aug 2026 (62 days)')}
               {alertCount > 0 && (
                 <div className="flex items-center gap-2 pl-4 border-l border-border/50">
                   <Pennant tone={(data.unserved?.length || data.kpis?.dryOutDays) ? 'critical' : 'warn'} size={16} />
@@ -244,5 +249,6 @@ export default function App() {
       <TopProgress active={optimizing} />
       <Toaster />
     </div>
+    </TipProvider>
   );
 }

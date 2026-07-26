@@ -3,6 +3,7 @@ import { DashboardData, Tank } from '../types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Modal } from '@/components/ui/modal';
 import { TankGauge } from '@/components/ui/TankGauge';
+import { Tip, TipRows } from '@/components/ui/tooltip';
 import { TankDetail } from './TankDetail';
 
 export default function TankFarmView({ data }: { data: DashboardData }) {
@@ -86,16 +87,22 @@ export default function TankFarmView({ data }: { data: DashboardData }) {
               const pr = proj(t);
               const dryRisk = pr?.firstDryOutDay != null;
               const topRisk = pr?.firstTankTopDay != null;
+              const dailyOut = data.nodeFlows?.find(f => f.locationId === t.locationId && f.productId === t.productId)?.dailyOut ?? 0;
+              const available = Math.max(0, t.currentStock - t.minStock);
+              const daysCover = dailyOut > 0 ? Math.floor(available / dailyOut) : null;
+              const status = dryRisk ? `dry-out d${pr!.firstDryOutDay}` : topRisk ? `tank-top d${pr!.firstTankTopDay}` : 'within limits';
               return (
-                <button key={t.id} onClick={() => setOpenTank(t)} className="group flex flex-col items-center rounded-md border border-border/70 bg-background/40 hover:bg-muted/30 hover:border-cyan-500/40 transition-colors p-2">
-                  <TankGauge id={t.id} color={p?.color ?? '#64748b'} fillPct={t.currentStock / t.capacity} minPct={t.minStock / t.capacity} incomingPct={incTotal / t.capacity} height={120} />
-                  <div className="mt-1 text-center">
-                    <div className="text-[11px] font-mono text-foreground/90 group-hover:text-cyan-300">{t.name}</div>
-                    <div className="text-[9px] text-muted-foreground">{p?.name} · {Math.round(t.currentStock / 1000)}k / {Math.round(t.capacity / 1000)}k</div>
-                    <div className="text-[9px] text-muted-foreground/75"><span className="text-cyan-400/80">ull</span> {Math.round((t.capacity - t.currentStock) / 1000)}k · <span className="text-ok/90">avl</span> {Math.round(Math.max(0, t.currentStock - t.minStock) / 1000)}k</div>
-                    {(dryRisk || topRisk) && <div className={`mt-0.5 text-[8px] px-1 py-0.5 rounded-md ${dryRisk ? 'bg-bad/15 text-bad' : 'bg-warn/15 text-warn'}`}>{dryRisk ? 'DRY-OUT RISK' : 'TANK-TOP RISK'}</div>}
-                  </div>
-                </button>
+                <Tip key={t.id} content={<TipRows title={`${t.name} · ${p?.name ?? ''}`} rows={[['Inventory', `${Math.round(t.currentStock).toLocaleString()} MT`], ['Ullage', `${Math.round(t.capacity - t.currentStock).toLocaleString()} MT`], ['Available', `${available.toLocaleString()} MT`], ['Days of cover', daysCover == null ? 'net positive' : `${daysCover} d`], ['Incoming', `${Math.round(incTotal).toLocaleString()} MT · ${inc.length}`], ['Status', status]]} />}>
+                  <button onClick={() => setOpenTank(t)} className="group flex flex-col items-center rounded-md border border-border/70 bg-background/40 hover:bg-muted/30 hover:border-cyan-500/40 transition-colors p-2">
+                    <TankGauge id={t.id} color={p?.color ?? '#64748b'} fillPct={t.currentStock / t.capacity} minPct={t.minStock / t.capacity} incomingPct={incTotal / t.capacity} height={120} />
+                    <div className="mt-1 text-center">
+                      <div className="text-[11px] font-mono text-foreground/90 group-hover:text-cyan-300">{t.name}</div>
+                      <div className="text-[9px] text-muted-foreground">{p?.name} · {Math.round(t.currentStock / 1000)}k / {Math.round(t.capacity / 1000)}k</div>
+                      <div className="text-[9px] text-muted-foreground/75"><span className="text-cyan-400/80">ull</span> {Math.round((t.capacity - t.currentStock) / 1000)}k · <span className="text-ok/90">avl</span> {Math.round(Math.max(0, t.currentStock - t.minStock) / 1000)}k</div>
+                      {(dryRisk || topRisk) && <div className={`mt-0.5 text-[8px] px-1 py-0.5 rounded-md ${dryRisk ? 'bg-bad/15 text-bad' : 'bg-warn/15 text-warn'}`}>{dryRisk ? 'DRY-OUT RISK' : 'TANK-TOP RISK'}</div>}
+                    </div>
+                  </button>
+                </Tip>
               );
             })}
           </CardContent>
