@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+﻿import { useMemo, useState } from 'react';
 import { DashboardData, Tank } from '../types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Modal } from '@/components/ui/modal';
@@ -37,14 +37,14 @@ export default function TankFarmView({ data }: { data: DashboardData }) {
       <div className="flex items-center justify-between">
         <h3 className="text-lg font-semibold text-foreground">Tank Farm — live inventory</h3>
         <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
-          <span className="flex items-center gap-1"><span className="w-3 border-t-2 border-dashed border-red-400" /> dry-out floor</span>
-          <span className="flex items-center gap-1"><span className="w-3 border-t-2 border-dashed border-amber-400" /> tank-top</span>
-          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-sky-400/30" /> incoming</span>
+          <span className="flex items-center gap-1"><span className="w-3 border-t-2 border-dashed border-bad" /> dry-out floor</span>
+          <span className="flex items-center gap-1"><span className="w-3 border-t-2 border-dashed border-warn" /> tank-top</span>
+          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-md bg-cyan-400/30" /> incoming</span>
         </div>
       </div>
 
       {[...byLoc.entries()].map(([locId, tanks]) => (
-        <Card key={locId} className="bg-card/50 border-border/80 rounded-lg">
+        <Card key={locId} className="bg-card/50 border-border/80 rounded-md">
           <CardHeader className="py-2.5 px-4 border-b border-border/60"><CardTitle className="text-sm font-semibold text-foreground/80">{loc(locId)}</CardTitle></CardHeader>
           <CardContent className="p-4 grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-3">
             {tanks.map(t => {
@@ -55,12 +55,12 @@ export default function TankFarmView({ data }: { data: DashboardData }) {
               const dryRisk = pr?.firstDryOutDay != null;
               const topRisk = pr?.firstTankTopDay != null;
               return (
-                <button key={t.id} onClick={() => setOpenTank(t)} className="group flex flex-col items-center rounded-lg border border-border/70 bg-background/40 hover:bg-muted/30 hover:border-sky-500/40 transition-colors p-2">
+                <button key={t.id} onClick={() => setOpenTank(t)} className="group flex flex-col items-center rounded-md border border-border/70 bg-background/40 hover:bg-muted/30 hover:border-cyan-500/40 transition-colors p-2">
                   <TankGauge id={t.id} color={p?.color ?? '#64748b'} fillPct={t.currentStock / t.capacity} minPct={t.minStock / t.capacity} incomingPct={incTotal / t.capacity} height={120} />
                   <div className="mt-1 text-center">
-                    <div className="text-[11px] font-mono text-foreground/90 group-hover:text-sky-300">{t.name}</div>
+                    <div className="text-[11px] font-mono text-foreground/90 group-hover:text-cyan-300">{t.name}</div>
                     <div className="text-[9px] text-muted-foreground">{p?.name} · {Math.round(t.currentStock / 1000)}k / {Math.round(t.capacity / 1000)}k</div>
-                    {(dryRisk || topRisk) && <div className={`mt-0.5 text-[8px] px-1 py-0.5 rounded ${dryRisk ? 'bg-red-500/15 text-red-400' : 'bg-amber-500/15 text-amber-400'}`}>{dryRisk ? 'DRY-OUT RISK' : 'TANK-TOP RISK'}</div>}
+                    {(dryRisk || topRisk) && <div className={`mt-0.5 text-[8px] px-1 py-0.5 rounded-md ${dryRisk ? 'bg-bad/15 text-bad' : 'bg-warn/15 text-warn'}`}>{dryRisk ? 'DRY-OUT RISK' : 'TANK-TOP RISK'}</div>}
                   </div>
                 </button>
               );

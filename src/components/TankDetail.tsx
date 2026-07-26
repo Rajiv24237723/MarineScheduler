@@ -1,4 +1,4 @@
-import { DashboardData, Tank } from '../types';
+﻿import { DashboardData, Tank } from '../types';
 import { TankGauge } from '@/components/ui/TankGauge';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
 import { format, addDays } from 'date-fns';
@@ -15,13 +15,13 @@ export function TankDetail({ tank, data }: { tank: Tank; data: DashboardData }) 
     .sort((a, b) => a.day - b.day);
   const pr = data.projection?.find(x => x.locationId === tank.locationId && x.productId === tank.productId);
   const series = (pr?.series ?? []).map(s => ({ date: format(addDays(START, s.day), 'MMM d'), stock: s.stock }));
-  const metric = (l: string, v: string) => <div className="flex justify-between bg-background/50 px-3 py-2 rounded-lg border border-border/70 text-xs"><span className="text-muted-foreground">{l}</span><span className="text-foreground/90 font-mono">{v}</span></div>;
+  const metric = (l: string, v: string) => <div className="flex justify-between bg-background/50 px-3 py-2 rounded-md border border-border/70 text-xs"><span className="text-muted-foreground">{l}</span><span className="text-foreground/90 font-mono">{v}</span></div>;
 
   return (
     <div className="grid grid-cols-3 gap-4">
       <div className="flex flex-col items-center">
         <TankGauge id={`d-${tank.id}`} color={p?.color ?? '#64748b'} fillPct={tank.currentStock / tank.capacity} minPct={tank.minStock / tank.capacity} incomingPct={inc.reduce((s, i) => s + i.qty, 0) / tank.capacity} height={190} />
-        {pr && <div className={`mt-2 text-[10px] px-2 py-0.5 rounded-full ${pr.firstDryOutDay != null ? 'bg-red-500/10 text-red-400' : pr.firstTankTopDay != null ? 'bg-amber-500/10 text-amber-400' : 'bg-emerald-500/10 text-emerald-400'}`}>{pr.firstDryOutDay != null ? `Dry-out day ${pr.firstDryOutDay}` : pr.firstTankTopDay != null ? `Tank-top day ${pr.firstTankTopDay}` : 'Within limits'}</div>}
+        {pr && <div className={`mt-2 text-[10px] px-2 py-0.5 rounded-full ${pr.firstDryOutDay != null ? 'bg-bad/10 text-bad' : pr.firstTankTopDay != null ? 'bg-warn/10 text-warn' : 'bg-ok/10 text-ok'}`}>{pr.firstDryOutDay != null ? `Dry-out day ${pr.firstDryOutDay}` : pr.firstTankTopDay != null ? `Tank-top day ${pr.firstTankTopDay}` : 'Within limits'}</div>}
       </div>
       <div className="col-span-2 space-y-2">
         <div className="grid grid-cols-2 gap-2">
@@ -30,7 +30,7 @@ export function TankDetail({ tank, data }: { tank: Tank; data: DashboardData }) 
           {metric('Dry-out floor', `${tank.minStock.toLocaleString()} MT`)}
           {metric('Ullage', `${Math.round(tank.capacity - tank.currentStock).toLocaleString()} MT`)}
         </div>
-        <div className="h-32 rounded-lg border border-border/70 bg-background/40 p-2">
+        <div className="h-32 rounded-md border border-border/70 bg-background/40 p-2">
           {series.length > 0 ? (
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={series} margin={{ top: 6, right: 8, bottom: 0, left: -10 }}>
@@ -49,7 +49,7 @@ export function TankDetail({ tank, data }: { tank: Tank; data: DashboardData }) 
           <div className="max-h-24 overflow-auto space-y-1">
             {inc.length === 0 ? <div className="text-[11px] text-muted-foreground">None scheduled.</div> :
               inc.map((i, idx) => (
-                <div key={idx} className="flex justify-between text-[11px] bg-background/50 px-2 py-1 rounded border border-border/60">
+                <div key={idx} className="flex justify-between text-[11px] bg-background/50 px-2 py-1 rounded-md border border-border/60">
                   <span className="text-foreground/80">{i.vessel}</span>
                   <span className="text-muted-foreground">{i.qty.toLocaleString()} MT · {format(addDays(START, i.day), 'MMM d')}</span>
                 </div>

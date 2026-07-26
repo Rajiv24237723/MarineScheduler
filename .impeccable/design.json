@@ -1,0 +1,146 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-07-26T00:00:00Z",
+  "title": "Design System: Marine Scheduler",
+  "extensions": {
+    "colorMeta": {
+      "primary": { "role": "primary", "displayName": "Depth-Contour Cyan", "canonical": "hsl(188 51% 53%)", "note": "Sole accent; raw form is #49b4c4 (sea-cyan). ~6.94:1 on primary-foreground.", "tonalRamp": ["#0c2530", "#124957", "#186c7d", "#2591a6", "#49b4c4", "#78c9d5", "#a6dde5", "#d3eef2"] },
+      "background": { "role": "neutral", "displayName": "Deep-Ocean Ground", "canonical": "hsl(210 73% 13%)", "tonalRamp": ["#050a12", "#0a1524", "#0f2036", "#142a48", "#1a355a", "#2c4d78", "#5a789e", "#9fb3ce"] },
+      "card": { "role": "neutral", "displayName": "Chart Panel", "canonical": "hsl(210 70% 16%)", "tonalRamp": ["#0a141f", "#10202f", "#162b40", "#1c3651", "#224162", "#345784", "#6180a6", "#a3b7d1"] },
+      "border": { "role": "neutral", "displayName": "Graticule Border", "canonical": "hsl(208 55% 25%)", "tonalRamp": ["#0e1a26", "#152838", "#1d374d", "#264663", "#2e5578", "#43709a", "#6d93b8", "#a7c1d8"] },
+      "foreground": { "role": "neutral", "displayName": "Chart Foreground", "canonical": "hsl(205 22% 93%)", "tonalRamp": ["#20262b", "#333d45", "#48545e", "#5e6d78", "#8695a0", "#a9b5be", "#cdd5db", "#eaeef1"] },
+      "ok": { "role": "tertiary", "displayName": "Sea Green (OK)", "canonical": "#35b08f", "tonalRamp": ["#0c2b23", "#124135", "#175748", "#1f7a63", "#2a9c7f", "#35b08f", "#68c7ac", "#a6dfce"] },
+      "warn": { "role": "tertiary", "displayName": "Sea Amber (Warn)", "canonical": "#e0b24a", "tonalRamp": ["#3a2c0e", "#574214", "#75591b", "#a37b26", "#c99a37", "#e0b24a", "#ebc978", "#f4e0a9"] },
+      "bad": { "role": "tertiary", "displayName": "Sea Red (Bad)", "canonical": "#e26a5a", "tonalRamp": ["#3a1712", "#57221b", "#752e24", "#a34033", "#c95445", "#e26a5a", "#ec9084", "#f4bab2"] },
+      "sea-sand": { "role": "tertiary", "displayName": "Sea Sand (LOAD mark)", "canonical": "#d8c4a0", "tonalRamp": ["#37301f", "#54492f", "#71623f", "#9c8858", "#c0a97a", "#d8c4a0", "#e4d6ba", "#f0e8d6"] }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Sounding Number", "purpose": "Hero KPI numbers and page/view titles in Newsreader serif, tabular figures. Reads as a chart sounding." },
+      "title": { "displayName": "Card Title", "purpose": "CardTitle in Newsreader 500, sentence case, leading-none." },
+      "body": { "displayName": "Body / UI", "purpose": "Inter 400 for dense UI text, tables, descriptions." },
+      "label": { "displayName": "Micro-Label", "purpose": "Letter-spaced uppercase Inter (the .font-cond hook) for KPI plate labels, nav group headers, readout captions." },
+      "mono": { "displayName": "Inline Figure", "purpose": "JetBrains Mono tabular for vessel names, versions, shadow prices, readout values." }
+    },
+    "shadows": [
+      { "name": "overlay-modal", "value": "0 25px 50px -12px rgba(0,0,0,0.5)", "purpose": "Modal only (shadow-2xl); the sole heavy shadow." },
+      { "name": "overlay-toast", "value": "0 20px 25px -5px rgba(0,0,0,0.4)", "purpose": "Toast card (shadow-xl)." },
+      { "name": "header-hint", "value": "0 1px 2px 0 rgba(0,0,0,0.05)", "purpose": "Barely-there header lift (shadow-sm)." },
+      { "name": "chip-inset", "value": "inset 0 0 0 999px color-mix(in srgb, currentColor 12%, transparent)", "purpose": "Stream sounding-chip tint fill." }
+    ],
+    "motion": [
+      { "name": "fade-in-up", "value": "fadeInUp .24s ease-out both", "purpose": "Content region enters on tab change (panels rise like a depth reading)." },
+      { "name": "hoist", "value": "hoist .34s cubic-bezier(0.22,1,0.36,1) both", "purpose": "Plan-signal band entrance." },
+      { "name": "scale-in", "value": "scaleIn .18s ease-out both", "purpose": "Modal entrance." },
+      { "name": "toast-in", "value": "toastIn .22s cubic-bezier(0.22,1,0.36,1) both", "purpose": "Toast entrance." },
+      { "name": "press", "value": "translateY(0.5px) scale(0.994)", "purpose": "Global button :active feedback." },
+      { "name": "focus-ring", "value": "outline: 2px solid rgb(73 180 196 / 0.8); outline-offset: 2px", "purpose": "Cyan focus-visible ring; reduced-motion guarded globally." }
+    ],
+    "breakpoints": [
+      { "name": "sm", "value": "640px" },
+      { "name": "md", "value": "768px" },
+      { "name": "lg", "value": "1024px" },
+      { "name": "xl", "value": "1280px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The only cyan-filled control; every action button on screen.",
+      "html": "<button class=\"ds-btn-primary\">Run optimiser</button>",
+      "css": ".ds-btn-primary { background: hsl(188 51% 53%); color: hsl(200 68% 10%); padding: 8px 16px; border: none; border-radius: 6px; font-family: Inter, sans-serif; font-size: 12px; font-weight: 500; cursor: pointer; transition: background-color .14s ease, transform .07s ease, opacity .14s ease; } .ds-btn-primary:hover { background: hsl(188 51% 53% / 0.9); } .ds-btn-primary:active { transform: translateY(0.5px) scale(0.994); } .ds-btn-primary:focus-visible { outline: 2px solid rgb(73 180 196 / 0.8); outline-offset: 2px; } .ds-btn-primary:disabled { opacity: 0.5; }"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Neutral action; carries no accent.",
+      "html": "<button class=\"ds-btn-secondary\">Versions</button>",
+      "css": ".ds-btn-secondary { background: hsl(209 42% 20%); color: hsl(205 22% 93% / 0.9); padding: 8px 14px; border: 1px solid hsl(208 55% 25% / 0.8); border-radius: 6px; font-family: Inter, sans-serif; font-size: 12px; font-weight: 500; cursor: pointer; transition: background-color .14s ease; } .ds-btn-secondary:hover { background: hsl(208 44% 23%); } .ds-btn-secondary:active { transform: translateY(0.5px) scale(0.994); }"
+    },
+    {
+      "name": "Text Input",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Standard field; mono for numeric/CSV entry.",
+      "html": "<input class=\"ds-input\" placeholder=\"MT/day\" />",
+      "css": ".ds-input { background: hsl(210 73% 13% / 0.5); color: hsl(205 22% 93%); padding: 6px 12px; border: 1px solid hsl(208 55% 25% / 0.8); border-radius: 6px; font-family: Inter, sans-serif; font-size: 13px; outline: none; transition: border-color .14s ease; } .ds-input:focus { border-color: rgb(6 182 212 / 0.5); } .ds-input:focus-visible { outline: 2px solid rgb(73 180 196 / 0.8); outline-offset: 2px; }"
+    },
+    {
+      "name": "Chart Panel Card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "Bordered panel that lifts by tonal step, not shadow.",
+      "html": "<div class=\"ds-card\"><div class=\"ds-card-header\"><h3 class=\"ds-card-title\">Exception queue</h3></div><div class=\"ds-card-body\">All clear.</div></div>",
+      "css": ".ds-card { background: hsl(210 70% 16% / 0.5); border: 1px solid hsl(208 55% 25% / 0.8); border-radius: 6px; overflow: hidden; } .ds-card-header { padding: 10px 16px; border-bottom: 1px solid hsl(208 55% 25% / 0.6); background: hsl(210 70% 16% / 0.7); } .ds-card-title { margin: 0; font-family: Newsreader, Georgia, serif; font-weight: 500; font-size: 16px; color: hsl(205 22% 93% / 0.9); } .ds-card-body { padding: 16px; font-family: Inter, sans-serif; font-size: 13px; color: hsl(205 22% 68%); }"
+    },
+    {
+      "name": "KPI Sounding Plate Strip",
+      "kind": "custom",
+      "refersTo": "kpi-plate",
+      "description": "Signature: one panel split into cells by gap-px; serif tabular numbers over uppercase micro-labels.",
+      "html": "<div class=\"ds-plate-strip\"><div class=\"ds-plate\"><div class=\"ds-plate-label\">Served</div><div class=\"ds-plate-value\">98%</div></div><div class=\"ds-plate\"><div class=\"ds-plate-label\">Voyages</div><div class=\"ds-plate-value\">14</div></div><div class=\"ds-plate\"><div class=\"ds-plate-label\">Fleet util</div><div class=\"ds-plate-value\">82%</div></div></div>",
+      "css": ".ds-plate-strip { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: hsl(208 55% 25% / 0.4); border: 1px solid hsl(208 55% 25% / 0.7); border-radius: 6px; overflow: hidden; } .ds-plate { background: hsl(210 70% 16%); padding: 12px 14px; } .ds-plate-label { font-family: Inter, sans-serif; font-size: 9px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.14em; color: hsl(205 22% 68%); } .ds-plate-value { font-family: Newsreader, Georgia, serif; font-size: 24px; color: hsl(205 22% 93%); margin-top: 4px; font-variant-numeric: tabular-nums; }"
+    },
+    {
+      "name": "Stream Sounding Chip",
+      "kind": "chip",
+      "refersTo": "kpi-plate",
+      "description": "Signature identity mark: stream initial in its own depth colour on a tinted plate (SignalFlag/StreamFlag).",
+      "html": "<span class=\"ds-stream-chip\" role=\"img\" aria-label=\"POL stream\">P</span>",
+      "css": ".ds-stream-chip { display: inline-flex; align-items: center; justify-content: center; width: 27px; height: 20px; font-family: 'JetBrains Mono', monospace; font-weight: 500; font-size: 11px; line-height: 1; color: #49b4c4; border: 1px solid #49b4c4; border-radius: 3px; box-shadow: inset 0 0 0 999px color-mix(in srgb, #49b4c4 12%, transparent); }"
+    },
+    {
+      "name": "Grouped Nav Item",
+      "kind": "nav",
+      "refersTo": "button-secondary",
+      "description": "Sidebar nav row; cyan is the only accent, reserved for the active item.",
+      "html": "<nav class=\"ds-nav\"><div class=\"ds-nav-group\">Planning</div><a class=\"ds-nav-item ds-active\"><span class=\"ds-nav-dot\"></span>Operational Plan</a><a class=\"ds-nav-item\"><span class=\"ds-nav-dot\"></span>Live Fleet / AIS</a></nav>",
+      "css": ".ds-nav { display: flex; flex-direction: column; gap: 4px; font-family: Inter, sans-serif; } .ds-nav-group { padding: 0 8px; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.18em; color: hsl(205 22% 68%); margin-bottom: 4px; } .ds-nav-item { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-radius: 6px; font-size: 14px; font-weight: 500; color: hsl(205 22% 68%); text-decoration: none; cursor: pointer; transition: background-color .2s ease, color .2s ease; } .ds-nav-dot { width: 16px; height: 16px; border-radius: 3px; background: currentColor; opacity: 0.7; } .ds-nav-item:hover { background: hsl(209 42% 20%); color: hsl(205 22% 93% / 0.9); } .ds-nav-item.ds-active { background: rgb(6 182 212 / 0.1); color: rgb(103 232 249); }"
+    },
+    {
+      "name": "Achievability Pill",
+      "kind": "chip",
+      "refersTo": "button-secondary",
+      "description": "Status pill with a Pennant tick; tinted wash + matching border in the sea status colour.",
+      "html": "<span class=\"ds-pill ds-pill-ok\"><svg width=\"10\" height=\"12\" viewBox=\"0 0 16 20\" aria-hidden=\"true\"><polygon points=\"0,10 16,2 16,18\" fill=\"#35b08f\"/></svg>Achievable · 100% served</span>",
+      "css": ".ds-pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 6px; border: 1px solid; font-family: Inter, sans-serif; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; } .ds-pill-ok { background: rgb(53 176 143 / 0.1); color: #35b08f; border-color: rgb(53 176 143 / 0.25); }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Admiralty Sea Chart",
+    "overview": "Marine Scheduler reads like a modern bathymetric chart rendered on a screen: a deep-ocean field, hairline graticule lines dividing every readout, and a single cyan depth-contour accent that carries all action. Everything sits on one continuous dark ground with panels raised by a half-step of lightness rather than by shadow. This is the Bathymetric Blue world, which fully replaced an earlier Signal Code system built on nautical signal flags; the flag metaphor is gone, though the primitives still carry their old export names to stay drop-in. The system is desktop-first and unapologetically data-dense; legibility at density is the governing constraint, so contrast is engineered, not decorative.",
+    "keyCharacteristics": [
+      "One deep-ocean ground; panels lift by tonal step, never by heavy shadow.",
+      "A single cyan accent for every action and active state.",
+      "Serif (Newsreader) for titles and hero numbers; the numbers read as chart soundings.",
+      "Hairline borders function as chart graticule; KPI strips are one panel split by gap-px.",
+      "Status color routes only through a muted sea palette (ok / warn / bad), never raw Tailwind hues."
+    ],
+    "rules": [
+      { "name": "The One Contour Rule", "body": "Cyan is the only accent. If a control needs to signal primary action or active, it uses cyan; nothing else in the system is allowed to. Secondary actions stay neutral (bg-muted).", "section": "colors" },
+      { "name": "The Muted-Sea Rule", "body": "Status meaning routes only through ok / warn / bad (and destructive for alert chrome). Never reach for raw Tailwind emerald, red, amber, or green.", "section": "colors" },
+      { "name": "The Sounding-Number Rule", "body": "Big numbers are serif (Newsreader) and tabular; small figures inline in text are mono (JetBrains). A KPI value is never set in Inter.", "section": "typography" },
+      { "name": "The Sentence-Case Rule", "body": "Titles and labels are sentence case; only the micro-label tier is uppercase, and only via letter-spacing.", "section": "typography" },
+      { "name": "The Tonal-Lift Rule", "body": "A panel is distinguished from its background by a lightness step and a hairline border, not by a shadow. Reserve box-shadow for true overlays (modal, toast).", "section": "elevation" },
+      { "name": "The Graticule Rule", "body": "Borders are 1px chart rulings, not containers. KPI plate strips are a single panel divided by gap-px over a bg-border/40 seam.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do carry every action and active state on cyan (hsl(188 51% 53%)); primary buttons are bg-primary + text-primary-foreground.",
+      "Do set hero KPI numbers and titles in Newsreader serif with tabular figures, and inline figures in JetBrains Mono.",
+      "Do build KPI strips as one bordered panel divided by gap-px, not as separate floating cards.",
+      "Do route all status through ok / warn / bad utilities and flag severity with a Pennant.",
+      "Do keep corners at 6px (rounded-md) and borders hairline; lift panels by tonal step, not shadow.",
+      "Do use sentence case for titles and reserve uppercase for the letter-spaced micro-label tier."
+    ],
+    "donts": [
+      "Don't introduce a second accent color for actions; if it acts, it is cyan.",
+      "Don't use raw Tailwind emerald / red / amber / green for status — use the muted sea palette.",
+      "Don't put drop shadows on resting surfaces; shadows belong only to overlays (modal, toast).",
+      "Don't set a KPI value in Inter, or a body label in serif.",
+      "Don't revive the retired Signal Code flag metaphor; the marks are chart soundings and ticks now, despite the legacy SignalFlag filename and exports.",
+      "Don't spend sea sand (#d8c4a0) anywhere but the LOAD stop marker — it is the system's only warm note."
+    ]
+  }
+}

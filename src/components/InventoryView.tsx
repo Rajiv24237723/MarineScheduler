@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+﻿import { useState, useMemo } from 'react';
 import { DashboardData, Tank } from '../types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Modal } from '@/components/ui/modal';
@@ -27,18 +27,18 @@ export default function InventoryView({ data }: { data: DashboardData }) {
     <div className="space-y-5">
       <div className="flex items-center justify-between">
         <h3 className="text-lg font-semibold text-foreground">Network Inventory Forecast</h3>
-        <select value={key} onChange={e => setKey(e.target.value)} className="bg-card/50 text-sm rounded-lg px-3 py-1.5 border border-border/80 text-foreground/90">
+        <select value={key} onChange={e => setKey(e.target.value)} className="bg-card/50 text-sm rounded-md px-3 py-1.5 border border-border/80 text-foreground/90">
           {projections.map(p => <option key={`${p.locationId}|${p.productId}`} value={`${p.locationId}|${p.productId}`}>{p.locationName} — {p.productName}</option>)}
         </select>
       </div>
 
-      <Card className="bg-card/50 border-border/80 rounded-lg">
+      <Card className="bg-card/50 border-border/80 rounded-md">
         <CardHeader className="py-3 px-4 border-b border-border/60 flex flex-row items-center justify-between">
           <CardTitle className="text-sm font-semibold text-foreground/80">{sel.locationName} · {sel.productName} — projected stock</CardTitle>
           <div className="flex gap-2 text-[10px]">
-            {sel.firstDryOutDay !== null && <span className="px-2 py-0.5 rounded-full bg-red-500/10 text-red-400 border border-red-500/20">DRY-OUT day {sel.firstDryOutDay}</span>}
-            {sel.firstTankTopDay !== null && <span className="px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20">TANK-TOP day {sel.firstTankTopDay}</span>}
-            {sel.firstDryOutDay === null && sel.firstTankTopDay === null && <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">WITHIN LIMITS</span>}
+            {sel.firstDryOutDay !== null && <span className="px-2 py-0.5 rounded-full bg-bad/10 text-bad border border-bad/20">DRY-OUT day {sel.firstDryOutDay}</span>}
+            {sel.firstTankTopDay !== null && <span className="px-2 py-0.5 rounded-full bg-warn/10 text-warn border border-warn/20">TANK-TOP day {sel.firstTankTopDay}</span>}
+            {sel.firstDryOutDay === null && sel.firstTankTopDay === null && <span className="px-2 py-0.5 rounded-full bg-ok/10 text-ok border border-ok/20">WITHIN LIMITS</span>}
           </div>
         </CardHeader>
         <CardContent className="p-4 h-[360px]">
@@ -56,17 +56,17 @@ export default function InventoryView({ data }: { data: DashboardData }) {
         </CardContent>
       </Card>
 
-      <Card className="bg-card/50 border-border/80 rounded-lg">
+      <Card className="bg-card/50 border-border/80 rounded-md">
         <CardHeader className="py-3 px-4 border-b border-border/60"><CardTitle className="text-xs font-semibold text-foreground/80">Nodes at risk ({atRisk.length})</CardTitle></CardHeader>
         <CardContent className="p-3">
-          {atRisk.length === 0 ? <div className="text-xs text-emerald-400 p-2">All nodes stay within dry-out and tank-top limits across the horizon.</div> :
+          {atRisk.length === 0 ? <div className="text-xs text-ok p-2">All nodes stay within dry-out and tank-top limits across the horizon.</div> :
             <div className="grid grid-cols-2 gap-2">
               {atRisk.map(p => (
-                <div key={`${p.locationId}|${p.productId}`} className="flex justify-between items-center bg-background/50 p-2 rounded-lg border border-border/80 text-xs">
-                  <button className="text-foreground/80 hover:text-sky-300" onClick={() => setKey(`${p.locationId}|${p.productId}`)}>{p.locationName} · {p.productName}</button>
+                <div key={`${p.locationId}|${p.productId}`} className="flex justify-between items-center bg-background/50 p-2 rounded-md border border-border/80 text-xs">
+                  <button className="text-foreground/80 hover:text-cyan-300" onClick={() => setKey(`${p.locationId}|${p.productId}`)}>{p.locationName} · {p.productName}</button>
                   <div className="flex items-center gap-2">
-                    <span className={p.firstDryOutDay !== null ? 'text-red-400' : 'text-amber-400'}>{p.firstDryOutDay !== null ? `dry-out d${p.firstDryOutDay}` : `tank-top d${p.firstTankTopDay}`}</span>
-                    {tankFor(p.locationId, p.productId) && <button onClick={() => setOpenTank(tankFor(p.locationId, p.productId))} className="px-2 py-0.5 rounded bg-sky-600 hover:bg-sky-500 text-white text-[10px]">Tank ›</button>}
+                    <span className={p.firstDryOutDay !== null ? 'text-bad' : 'text-warn'}>{p.firstDryOutDay !== null ? `dry-out d${p.firstDryOutDay}` : `tank-top d${p.firstTankTopDay}`}</span>
+                    {tankFor(p.locationId, p.productId) && <button onClick={() => setOpenTank(tankFor(p.locationId, p.productId))} className="px-2 py-0.5 rounded-md bg-primary hover:bg-primary/90 text-primary-foreground text-[10px]">Tank ›</button>}
                   </div>
                 </div>
               ))}

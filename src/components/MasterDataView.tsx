@@ -1,4 +1,4 @@
-import { useState } from 'react';
+﻿import { useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Modal } from '@/components/ui/modal';
 import { toast } from './ui/toast';
@@ -109,18 +109,18 @@ export default function MasterDataView({ stream, data, refresh }: { stream: stri
       <div className="flex items-center justify-between">
         <h3 className="text-lg font-semibold text-foreground">Master Data — {stream}</h3>
         <div className="flex gap-2">
-          <button onClick={() => { setCsvText(toCSV(rows, cfg.cols)); setImportOpen(true); }} className="flex items-center gap-1.5 px-3 py-1.5 bg-muted hover:bg-accent border border-border/80 rounded-lg text-xs"><Upload className="w-3.5 h-3.5" /> Import CSV</button>
-          <button onClick={exportCSV} className="flex items-center gap-1.5 px-3 py-1.5 bg-muted hover:bg-accent border border-border/80 rounded-lg text-xs"><Download className="w-3.5 h-3.5" /> Export</button>
-          <button onClick={add} className="flex items-center gap-1.5 px-3 py-1.5 bg-sky-600 hover:bg-sky-500 text-white rounded-lg text-xs"><Plus className="w-3.5 h-3.5" /> Add row</button>
+          <button onClick={() => { setCsvText(toCSV(rows, cfg.cols)); setImportOpen(true); }} className="flex items-center gap-1.5 px-3 py-1.5 bg-muted hover:bg-accent border border-border/80 rounded-md text-xs"><Upload className="w-3.5 h-3.5" /> Import CSV</button>
+          <button onClick={exportCSV} className="flex items-center gap-1.5 px-3 py-1.5 bg-muted hover:bg-accent border border-border/80 rounded-md text-xs"><Download className="w-3.5 h-3.5" /> Export</button>
+          <button onClick={add} className="flex items-center gap-1.5 px-3 py-1.5 bg-primary hover:bg-primary/90 text-primary-foreground rounded-md text-xs"><Plus className="w-3.5 h-3.5" /> Add row</button>
         </div>
       </div>
       <div className="flex gap-1 border-b border-border/60 flex-wrap">
         {Object.keys(TABS).map(t => (
-          <button key={t} onClick={() => setTab(t)} className={`px-3 py-2 text-xs font-medium -mb-px border-b-2 ${tab === t ? 'border-sky-500 text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground/80'}`}>{t}</button>
+          <button key={t} onClick={() => setTab(t)} className={`px-3 py-2 text-xs font-medium -mb-px border-b-2 ${tab === t ? 'border-cyan-500 text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground/80'}`}>{t}</button>
         ))}
       </div>
-      {cfg.note && <p className="text-[11px] text-sky-300/80 -mt-1">{cfg.note}</p>}
-      <Card className="bg-card/50 border-border/80 rounded-lg">
+      {cfg.note && <p className="text-[11px] text-cyan-300/80 -mt-1">{cfg.note}</p>}
+      <Card className="bg-card/50 border-border/80 rounded-md">
         <CardContent className="p-0 overflow-auto max-h-[62vh]">
           <table className="w-full text-xs">
             <thead className="bg-background/50 border-b border-border/60 sticky top-0"><tr>{cfg.cols.map(c => <th key={c.key} className="text-left px-3 py-2 font-medium text-muted-foreground/80">{c.label}</th>)}<th className="w-16" /></tr></thead>
@@ -131,12 +131,12 @@ export default function MasterDataView({ stream, data, refresh }: { stream: stri
                     <td key={c.key} className="px-2 py-1">
                       <input defaultValue={row[c.key]} type={c.num ? 'number' : 'text'} readOnly={c.key === 'id'}
                         onBlur={e => { if (c.key !== 'id' && String(e.target.value) !== String(row[c.key])) put(row.id, c.key, e.target.value, c.num); }}
-                        className="w-full bg-transparent px-1.5 py-1 rounded border border-transparent hover:border-border/60 focus:border-sky-500/50 focus:bg-background/50 outline-none text-foreground/90 read-only:text-muted-foreground/60" />
+                        className="w-full bg-transparent px-1.5 py-1 rounded-md border border-transparent hover:border-border/60 focus:border-cyan-500/50 focus:bg-background/50 outline-none text-foreground/90 read-only:text-muted-foreground/60" />
                     </td>
                   ))}
                   <td className="px-2"><div className="flex items-center gap-2 justify-end">
-                    {tab === 'Vessels' && <button onClick={() => setVesselDetail(row as Vessel)} className="text-muted-foreground hover:text-sky-400" title="Vessel details"><Maximize2 className="w-3.5 h-3.5" /></button>}
-                    <button onClick={() => del(row.id)} className="text-muted-foreground hover:text-red-400" title="Delete"><Trash2 className="w-3.5 h-3.5" /></button>
+                    {tab === 'Vessels' && <button onClick={() => setVesselDetail(row as Vessel)} className="text-muted-foreground hover:text-cyan-400" title="Vessel details"><Maximize2 className="w-3.5 h-3.5" /></button>}
+                    <button onClick={() => del(row.id)} className="text-muted-foreground hover:text-bad" title="Delete"><Trash2 className="w-3.5 h-3.5" /></button>
                   </div></td>
                 </tr>
               ))}
@@ -145,16 +145,16 @@ export default function MasterDataView({ stream, data, refresh }: { stream: stri
           </table>
         </CardContent>
       </Card>
-      <p className="text-[11px] text-muted-foreground">Edit a cell and click away to save. Changes take effect on the next <span className="text-sky-400">Run Optimizer</span>.</p>
+      <p className="text-[11px] text-muted-foreground">Edit a cell and click away to save. Changes take effect on the next <span className="text-cyan-400">Run Optimizer</span>.</p>
 
       {/* CSV import modal */}
       <Modal open={importOpen} onClose={() => setImportOpen(false)} title={`Import ${tab} (CSV)`} subtitle={`Stream ${stream} · header row required (id optional)`} width="max-w-2xl">
         <div className="space-y-3">
           <input type="file" accept=".csv,text/csv" onChange={e => onFile(e.target.files?.[0])} className="text-xs text-muted-foreground" />
-          <textarea value={csvText} onChange={e => setCsvText(e.target.value)} spellCheck={false} className="w-full h-56 bg-background/60 border border-border/70 rounded-lg p-2 font-mono text-[11px] text-foreground/90 outline-none focus:border-sky-500/50" />
+          <textarea value={csvText} onChange={e => setCsvText(e.target.value)} spellCheck={false} className="w-full h-56 bg-background/60 border border-border/70 rounded-md p-2 font-mono text-[11px] text-foreground/90 outline-none focus:border-cyan-500/50" />
           <div className="flex justify-end gap-2">
-            <button onClick={() => doImport(false)} disabled={importing} className="px-3 py-1.5 bg-muted hover:bg-accent border border-border/80 rounded-lg text-xs disabled:opacity-50">Append rows</button>
-            <button onClick={() => doImport(true)} disabled={importing} className="px-3 py-1.5 bg-sky-600 hover:bg-sky-500 text-white rounded-lg text-xs disabled:opacity-50">{importing ? 'Importing…' : `Replace all ${stream} rows`}</button>
+            <button onClick={() => doImport(false)} disabled={importing} className="px-3 py-1.5 bg-muted hover:bg-accent border border-border/80 rounded-md text-xs disabled:opacity-50">Append rows</button>
+            <button onClick={() => doImport(true)} disabled={importing} className="px-3 py-1.5 bg-primary hover:bg-primary/90 text-primary-foreground rounded-md text-xs disabled:opacity-50">{importing ? 'Importing…' : `Replace all ${stream} rows`}</button>
           </div>
         </div>
       </Modal>
@@ -164,7 +164,7 @@ export default function MasterDataView({ stream, data, refresh }: { stream: stri
         {vesselDetail && (() => {
           const v = vesselDetail; const u = util(v);
           const totalCap = v.compartments.reduce((s, c) => s + c.cap, 0); const maxCap = Math.max(1, ...v.compartments.map(c => c.cap));
-          const spec = (l: string, val: string) => <div className="flex justify-between bg-background/50 px-3 py-1.5 rounded-lg border border-border/70 text-xs"><span className="text-muted-foreground">{l}</span><span className="text-foreground/90 font-mono">{val}</span></div>;
+          const spec = (l: string, val: string) => <div className="flex justify-between bg-background/50 px-3 py-1.5 rounded-md border border-border/70 text-xs"><span className="text-muted-foreground">{l}</span><span className="text-foreground/90 font-mono">{val}</span></div>;
           return (
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-2">
@@ -176,14 +176,14 @@ export default function MasterDataView({ stream, data, refresh }: { stream: stri
                 <div className="text-[11px] font-medium text-muted-foreground mb-1.5">Compartment layout</div>
                 <div className="space-y-1.5">{v.compartments.map(c => (
                   <div key={c.id} className="flex items-center gap-2"><span className="w-10 text-[11px] font-mono text-foreground/80">{c.id}</span>
-                    <div className="flex-1 h-5 rounded bg-muted/40 overflow-hidden border border-border/60"><div className="h-full bg-sky-500/50 flex items-center px-2" style={{ width: `${(c.cap / maxCap) * 100}%` }}><span className="text-[10px] font-mono text-foreground/90">{c.cap.toLocaleString()} MT</span></div></div>
+                    <div className="flex-1 h-5 rounded-md bg-muted/40 overflow-hidden border border-border/60"><div className="h-full bg-cyan-500/50 flex items-center px-2" style={{ width: `${(c.cap / maxCap) * 100}%` }}><span className="text-[10px] font-mono text-foreground/90">{c.cap.toLocaleString()} MT</span></div></div>
                   </div>))}
                 </div>
               </div>
               <div>
                 <div className="text-[11px] font-medium text-muted-foreground mb-1.5">Utilisation in current {stream} plan</div>
                 <div className="grid grid-cols-4 gap-2 text-center">{[['Voyages', String(u.voyages)], ['MT carried', u.mt.toLocaleString()], ['Days at work', String(u.days)], ['Cost', fmtM(u.cost)]].map(([l, val]) => (
-                  <div key={l} className="bg-background/50 p-2 rounded-lg border border-border/70"><div className="text-[10px] text-muted-foreground">{l}</div><div className="text-sm font-semibold text-foreground mt-0.5">{val}</div></div>))}
+                  <div key={l} className="bg-background/50 p-2 rounded-md border border-border/70"><div className="text-[10px] text-muted-foreground">{l}</div><div className="text-sm font-semibold text-foreground mt-0.5">{val}</div></div>))}
                 </div>
               </div>
             </div>

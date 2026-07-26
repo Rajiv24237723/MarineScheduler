@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+﻿import { useEffect, useState } from 'react';
 import { CheckCircle2, AlertTriangle, Info, X } from 'lucide-react';
 
 export type ToastKind = 'success' | 'error' | 'info';
@@ -19,9 +19,9 @@ export function toast(message: string, kind: ToastKind = 'info', ms = 3800) {
 export function dismiss(id: number) { items = items.filter(t => t.id !== id); emit(); }
 
 const styles: Record<ToastKind, { icon: any; cls: string }> = {
-  success: { icon: CheckCircle2, cls: 'text-emerald-400 border-emerald-500/30' },
-  error: { icon: AlertTriangle, cls: 'text-red-400 border-red-500/30' },
-  info: { icon: Info, cls: 'text-sky-300 border-sky-500/30' },
+  success: { icon: CheckCircle2, cls: 'text-ok border-ok/30' },
+  error: { icon: AlertTriangle, cls: 'text-bad border-bad/30' },
+  info: { icon: Info, cls: 'text-cyan-300 border-cyan-500/30' },
 };
 
 export function Toaster() {
@@ -32,7 +32,7 @@ export function Toaster() {
       {list.map(t => {
         const s = styles[t.kind]; const Icon = s.icon;
         return (
-          <div key={t.id} className={`animate-toast-in flex items-start gap-2.5 rounded-lg border ${s.cls} bg-card/95 backdrop-blur px-3.5 py-2.5 shadow-xl`}>
+          <div key={t.id} className={`animate-toast-in flex items-start gap-2.5 rounded-md border ${s.cls} bg-card/95 backdrop-blur px-3.5 py-2.5 shadow-xl`}>
             <Icon className={`w-4 h-4 mt-0.5 shrink-0 ${s.cls.split(' ')[0]}`} />
             <div className="text-xs text-foreground/90 flex-1 leading-snug">{t.message}</div>
             <button onClick={() => dismiss(t.id)} aria-label="Dismiss" className="text-muted-foreground hover:text-foreground shrink-0"><X className="w-3.5 h-3.5" /></button>

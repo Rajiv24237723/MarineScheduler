@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @license
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -7,6 +7,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Ship, LayoutDashboard, CalendarDays, Factory, Map as MapIcon, Settings, AlertTriangle, Database, TrendingUp, Bell } from 'lucide-react';
 import { DashboardData } from './types';
 import { Toaster, TopProgress, toast } from './components/ui/toast';
+import { StreamFlag, Pennant } from './components/ui/SignalFlag';
 import DashboardView from './components/DashboardView';
 import SchedulerView from './components/SchedulerView';
 import TankFarmView from './components/TankFarmView';
@@ -50,12 +51,19 @@ export default function App() {
 
   if (!data) return (
     <div className="flex flex-col items-center justify-center h-screen w-screen bg-background text-muted-foreground gap-3">
-      <div className="w-6 h-6 rounded-full border-2 border-sky-500/30 border-t-sky-400 animate-spin" />
+      <div className="w-6 h-6 rounded-full border-2 border-primary/30 border-t-primary animate-spin" />
       <span className="text-sm">Loading Marine Scheduler…</span>
     </div>
   );
 
   const alertCount = (data.unserved?.length ?? 0) + (data.kpis?.dryOutDays ?? 0) + (data.kpis?.tankTopDays ?? 0);
+
+  const readout = (label: string, value: string, tone = 'text-foreground') => (
+    <div className="px-4 border-l border-border/50 first:border-l-0 first:pl-0">
+      <div className="font-cond text-[9px] uppercase tracking-[0.16em] text-muted-foreground leading-none">{label}</div>
+      <div className={cn('text-sm font-semibold font-mono leading-tight mt-1', tone)}>{value}</div>
+    </div>
+  );
 
   const activeVersion = data.versions?.find(v => v.status === 'Active');
 
@@ -98,62 +106,59 @@ export default function App() {
   const activeTabLabel = allTabs.find(t => t.id === activeTab)?.label || (activeTab === 'settings' ? 'Settings' : 'Command Center');
 
   return (
-    <div className="flex h-screen w-full bg-background text-foreground overflow-hidden font-sans selection:bg-sky-500/30">
+    <div className="flex h-screen w-full bg-background text-foreground overflow-hidden font-sans selection:bg-cyan-500/30">
       {/* Refined Sidebar */}
       <div className="w-64 border-r border-border/60 bg-card/80 backdrop-blur-md flex flex-col z-10 flex-shrink-0">
         <div className="h-16 flex flex-col justify-center px-5 border-b border-border/60">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-sky-500/10 flex items-center justify-center border border-sky-500/20">
-              <Ship className="w-4 h-4 text-sky-400" />
-            </div>
+            <div className="shrink-0"><StreamFlag stream={stream} size={22} /></div>
             <div>
-              <h1 className="font-semibold text-sm tracking-tight text-foreground">Marine Scheduler</h1>
-              <div className="text-[10px] text-muted-foreground font-medium">Coastal MIRP Planner</div>
+              <h1 className="font-serif font-semibold text-[17px] tracking-tight text-foreground leading-none">Marine Scheduler</h1>
+              <div className="font-cond text-[10px] text-muted-foreground uppercase tracking-[0.16em] mt-1">Coastal marine · MIRP</div>
             </div>
           </div>
         </div>
-        
-        {/* Stream Switcher */}
+
+        {/* Stream Switcher — coded flags */}
         <div className="p-4 border-b border-border/60">
-          <label className="text-[11px] font-medium text-muted-foreground/80 mb-2 block">Active Stream</label>
-          <div className="grid grid-cols-3 gap-1 p-1 bg-background/50 rounded-lg border border-border/80">
+          <label className="font-cond text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground mb-2 block">Stream</label>
+          <div className="grid grid-cols-3 gap-1.5">
             {['CRUDE', 'LNG', 'POL'].map(s => (
               <button
                 key={s}
                 onClick={() => setStream(s)}
                 className={cn(
-                  "py-1.5 text-[11px] font-medium rounded-md transition-all duration-200",
-                  stream === s 
-                    ? "bg-muted text-foreground shadow-sm border border-border/80/50" 
-                    : "text-muted-foreground hover:text-foreground/90 hover:bg-muted/50"
+                  "flex flex-col items-center gap-1.5 py-2 rounded-md border transition-all",
+                  stream === s ? "bg-muted border-border text-foreground" : "bg-background/40 border-border/60 text-muted-foreground hover:text-foreground/90 hover:border-border"
                 )}
               >
-                {s}
+                <StreamFlag stream={s} size={16} />
+                <span className="font-cond text-[10px] font-semibold tracking-wide">{s}</span>
               </button>
             ))}
           </div>
         </div>
-        
+
         <div className="flex-1 py-4 flex flex-col gap-4 px-3 overflow-y-auto">
           {navigationGroups.map((group, idx) => (
             <div key={idx} className="flex flex-col gap-1">
               <div className="px-2 mb-1">
-                <span className="text-[10px] font-semibold text-muted-foreground/80 uppercase tracking-wider">{group.label}</span>
+                <span className="font-cond text-[10px] font-semibold text-muted-foreground uppercase tracking-[0.18em]">{group.label}</span>
               </div>
               {group.items.map(tab => (
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
                   className={cn(
-                    "flex items-center px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 group w-full text-left",
+                    "flex items-center px-3 py-2 rounded-md text-sm font-medium transition-all duration-200 group w-full text-left",
                     activeTab === tab.id 
-                      ? "bg-sky-500/10 text-sky-300" 
+                      ? "bg-cyan-500/10 text-cyan-300" 
                       : "text-muted-foreground hover:bg-muted hover:text-foreground/90"
                   )}
                 >
                   <tab.icon className={cn(
                     "w-4 h-4 mr-3 transition-transform duration-200",
-                    activeTab === tab.id ? "text-sky-400" : "text-muted-foreground/80 group-hover:text-foreground/80"
+                    activeTab === tab.id ? "text-cyan-400" : "text-muted-foreground/80 group-hover:text-foreground/80"
                   )} />
                   <span className="truncate">{tab.label}</span>
                 </button>
@@ -163,8 +168,8 @@ export default function App() {
         </div>
 
         <div className="p-4 border-t border-border/60">
-          <button onClick={() => setActiveTab('settings')} className={cn("flex items-center w-full px-3 py-2 text-sm font-medium rounded-lg transition-colors", activeTab === 'settings' ? "bg-sky-500/10 text-sky-300" : "text-muted-foreground hover:text-foreground/90 hover:bg-muted")}>
-            <Settings className={cn("w-4 h-4 mr-3", activeTab === 'settings' ? "text-sky-400" : "text-muted-foreground/80")} />
+          <button onClick={() => setActiveTab('settings')} className={cn("flex items-center w-full px-3 py-2 text-sm font-medium rounded-md transition-colors", activeTab === 'settings' ? "bg-cyan-500/10 text-cyan-300" : "text-muted-foreground hover:text-foreground/90 hover:bg-muted")}>
+            <Settings className={cn("w-4 h-4 mr-3", activeTab === 'settings' ? "text-cyan-400" : "text-muted-foreground/80")} />
             <span className="truncate">Settings</span>
           </button>
         </div>
@@ -173,25 +178,37 @@ export default function App() {
       {/* Main Content */}
       <div className="flex-1 flex flex-col min-w-0 z-10 relative bg-background">
         {/* Subtle background radial gradient for depth */}
-        <div className="absolute top-0 left-0 w-full h-[300px] bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-sky-500/5 via-background to-background pointer-events-none opacity-50"></div>
+        <div className="absolute top-0 left-0 w-full h-[300px] bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-primary/[0.07] via-background to-background pointer-events-none opacity-60"></div>
 
         {/* Global Context Header */}
         <header className="h-16 flex items-center justify-between px-8 border-b border-border/60 bg-card/80 backdrop-blur-md relative z-20 shadow-sm">
-          <div className="flex flex-col">
-            <div className="flex items-center gap-4 text-xs font-mono text-muted-foreground">
-              <span className="flex items-center gap-1.5"><span className="text-muted-foreground/80">ACTIVE PLAN:</span> <span className="text-foreground/90 font-medium font-sans">Jul-Aug 2026 · {stream}</span> {activeVersion ? <span className="text-sky-400 border border-sky-400/30 px-1.5 py-0.5 rounded text-[10px] font-sans font-medium">v{activeVersion.version}</span> : <span className="text-muted-foreground/60 font-sans">no plan yet</span>}</span>
-              <span className="text-border">|</span>
-              <span className="flex items-center gap-1.5"><span className="text-muted-foreground/80">HORIZON:</span> <span className="font-sans">01 Jul - 31 Aug 2026</span></span>
-              <span className="text-border">|</span>
-              <span className="flex items-center gap-1.5"><span className="text-muted-foreground/80">SERVED:</span> <span className="font-sans">{data.kpis?.demandServedPct ?? 0}%</span></span>
+          <div className="flex items-center gap-5">
+            <div className="flex items-center gap-2.5">
+              <StreamFlag stream={stream} size={26} />
+              <div>
+                <div className="font-cond text-[9px] uppercase tracking-[0.16em] text-muted-foreground leading-none">Operating plan</div>
+                <div className="text-sm font-semibold text-foreground leading-tight mt-1">{stream} {activeVersion ? <span className="font-mono text-cyan-300">v{activeVersion.version}</span> : <span className="text-muted-foreground font-normal">— none</span>}</div>
+              </div>
+            </div>
+            <div className="h-8 w-px bg-border/70" />
+            <div className="flex items-stretch">
+              {readout('Served', `${data.kpis?.demandServedPct ?? 0}%`, (data.kpis?.demandServedPct ?? 0) >= 100 ? 'text-ok' : 'text-warn')}
+              {readout('Voyages', String(data.kpis?.voyageCount ?? 0))}
+              {readout('Horizon', 'Jul–Aug')}
+              {alertCount > 0 && (
+                <div className="flex items-center gap-2 pl-4 border-l border-border/50">
+                  <Pennant tone={(data.unserved?.length || data.kpis?.dryOutDays) ? 'critical' : 'warn'} size={16} />
+                  <div><div className="font-cond text-[9px] uppercase tracking-[0.16em] text-muted-foreground leading-none">Alerts</div><div className="text-sm font-semibold text-foreground font-mono leading-tight mt-1">{alertCount}</div></div>
+                </div>
+              )}
             </div>
           </div>
-          <div className="flex items-center gap-4">
-            <button onClick={() => setActiveTab('replan')} className="px-3 py-1.5 text-xs font-medium bg-muted hover:bg-accent border border-border/80 rounded-md text-foreground/90 transition-colors">
+          <div className="flex items-center gap-3">
+            <button onClick={() => setActiveTab('replan')} className="px-3.5 py-2 text-xs font-medium bg-muted hover:bg-accent border border-border/80 rounded-md text-foreground/90 transition-colors">
               Versions
             </button>
-            <button onClick={runOptimize} disabled={optimizing} className="px-3 py-1.5 text-xs font-medium bg-sky-600 hover:bg-sky-500 text-white rounded-md transition-colors shadow-sm disabled:opacity-50">
-              {optimizing ? 'Optimizing…' : 'Run Optimizer'}
+            <button onClick={runOptimize} disabled={optimizing} className="px-4 py-2 text-xs font-medium bg-primary hover:bg-primary/90 text-primary-foreground rounded-md transition-colors disabled:opacity-50">
+              {optimizing ? 'Optimising…' : 'Run optimiser'}
             </button>
           </div>
         </header>
@@ -199,13 +216,13 @@ export default function App() {
         {/* Page Sub-Header */}
         <header className="h-14 flex items-center justify-between px-8 border-b border-border/40 bg-background/40 backdrop-blur-md relative z-20">
           <div className="flex items-center gap-3">
-            <h2 className="text-lg font-semibold text-foreground">{activeTabLabel}</h2>
+            <h2 className="font-serif text-2xl font-medium text-foreground">{activeTabLabel}</h2>
           </div>
           <div className="flex items-center gap-3">
             {alertCount > 0 && <span className="text-[11px] text-muted-foreground hidden sm:inline">{alertCount} open alert{alertCount === 1 ? '' : 's'}</span>}
             <button onClick={() => setActiveTab('replan')} aria-label={`Alerts and actions${alertCount ? ` (${alertCount})` : ''}`} title="Alerts & Actions" className="relative p-2 text-muted-foreground hover:text-foreground rounded-full hover:bg-muted">
               <Bell className="w-4 h-4" />
-              {alertCount > 0 && <span className="absolute -top-0.5 -right-0.5 min-w-[15px] h-[15px] px-1 flex items-center justify-center text-[8px] font-semibold bg-rose-500 text-white rounded-full border border-background">{alertCount > 9 ? '9+' : alertCount}</span>}
+              {alertCount > 0 && <span className="absolute -top-0.5 -right-0.5 min-w-[15px] h-[15px] px-1 flex items-center justify-center text-[8px] font-semibold bg-destructive text-destructive-foreground rounded-full border border-background">{alertCount > 9 ? '9+' : alertCount}</span>}
             </button>
           </div>
         </header>

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+﻿import { useState } from 'react';
 import { DashboardData, Voyage } from '../types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Modal } from '@/components/ui/modal';
@@ -72,18 +72,18 @@ export default function ReplanningView({ data, stream, refresh }: { data: Dashbo
       </div>
 
       {/* Posture: as-of + mode */}
-      <Card className="bg-card/50 border-border/80 rounded-lg">
+      <Card className="bg-card/50 border-border/80 rounded-md">
         <CardContent className="p-4 grid grid-cols-2 gap-6">
           <div>
-            <div className="flex justify-between text-xs mb-1"><label className="text-muted-foreground flex items-center gap-1.5"><Snowflake className="w-3.5 h-3.5 text-sky-400" /> Planning as of (freeze committed voyages before)</label><span className="font-mono text-foreground/90">{format(addDays(START, asOf), 'MMM d')} (day {asOf})</span></div>
-            <input type="range" min={0} max={40} value={asOf} onChange={e => setAsOf(Number(e.target.value))} className="w-full accent-sky-500" />
+            <div className="flex justify-between text-xs mb-1"><label className="text-muted-foreground flex items-center gap-1.5"><Snowflake className="w-3.5 h-3.5 text-cyan-400" /> Planning as of (freeze committed voyages before)</label><span className="font-mono text-foreground/90">{format(addDays(START, asOf), 'MMM d')} (day {asOf})</span></div>
+            <input type="range" min={0} max={40} value={asOf} onChange={e => setAsOf(Number(e.target.value))} className="w-full accent-cyan-500" />
             <div className="text-[10px] text-muted-foreground/70 mt-0.5">Voyages already underway before this date are locked; only the future is re-planned.</div>
           </div>
           <div>
             <label className="text-xs text-muted-foreground">Recovery mode</label>
             <div className="grid grid-cols-3 gap-2 mt-1">
               {[['minimal-edit', 'Minimal-edit', 'Change only the voyages the disruption forces (destroy/repair)'], ['minimal-change', 'Minimal-change', 'Freeze the next ~2 weeks too'], ['cost-optimal', 'Cost-optimal', 'Re-plan the whole future for lowest cost']].map(([id, label, desc]) => (
-                <button key={id} onClick={() => setMode(id)} className={`text-left px-2.5 py-2 rounded-lg border text-xs ${mode === id ? 'bg-sky-500/10 border-sky-500/40 text-foreground' : 'bg-background/50 border-border/70 text-muted-foreground hover:text-foreground/80'}`}>
+                <button key={id} onClick={() => setMode(id)} className={`text-left px-2.5 py-2 rounded-md border text-xs ${mode === id ? 'bg-cyan-500/10 border-cyan-500/40 text-foreground' : 'bg-background/50 border-border/70 text-muted-foreground hover:text-foreground/80'}`}>
                   <div className="font-medium">{label}</div><div className="text-[10px] mt-0.5 text-muted-foreground leading-tight">{desc}</div>
                 </button>
               ))}
@@ -95,72 +95,72 @@ export default function ReplanningView({ data, stream, refresh }: { data: Dashbo
       {/* System-generated feasibility banner */}
       {check?.hasPlan && (
         check.holds
-          ? <div className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/25 text-emerald-400 text-sm"><CheckCircle2 className="w-4 h-4" /> Operating plan{check.activeVersion ? ` (v${check.activeVersion})` : ''} still holds under these events — no replan required.</div>
-          : <div className="px-4 py-2.5 rounded-lg bg-red-500/10 border border-red-500/25 text-sm">
-              <div className="flex items-center gap-2 text-red-400 font-medium"><AlertTriangle className="w-4 h-4" /> System alert: operating plan is no longer feasible ({check.breaches.length} breach{check.breaches.length === 1 ? '' : 'es'}).</div>
+          ? <div className="flex items-center gap-2 px-4 py-2.5 rounded-md bg-ok/10 border border-ok/25 text-ok text-sm"><CheckCircle2 className="w-4 h-4" /> Operating plan{check.activeVersion ? ` (v${check.activeVersion})` : ''} still holds under these events — no replan required.</div>
+          : <div className="px-4 py-2.5 rounded-md bg-bad/10 border border-bad/25 text-sm">
+              <div className="flex items-center gap-2 text-bad font-medium"><AlertTriangle className="w-4 h-4" /> System alert: operating plan is no longer feasible ({check.breaches.length} breach{check.breaches.length === 1 ? '' : 'es'}).</div>
               <div className="mt-1 text-[11px] text-muted-foreground">{check.breaches.slice(0, 3).join(' · ')}</div>
             </div>
       )}
 
       <div className="grid grid-cols-2 gap-3">
         {/* Event composer */}
-        <Card className="bg-card/50 border-border/80 rounded-lg">
-          <CardHeader className="py-2.5 px-4 border-b border-border/60"><CardTitle className="text-xs font-semibold text-foreground/80 flex items-center gap-2"><AlertTriangle className="w-3.5 h-3.5 text-amber-400" /> Disruption events</CardTitle></CardHeader>
+        <Card className="bg-card/50 border-border/80 rounded-md">
+          <CardHeader className="py-2.5 px-4 border-b border-border/60"><CardTitle className="text-xs font-semibold text-foreground/80 flex items-center gap-2"><AlertTriangle className="w-3.5 h-3.5 text-warn" /> Disruption events</CardTitle></CardHeader>
           <CardContent className="p-3 space-y-3 text-xs">
             <div>
               <label className="text-[11px] text-muted-foreground">Demand revision (new daily offtake)</label>
-              <div className="flex gap-2 mt-1"><select value={flowNode} onChange={e => setFlowNode(e.target.value)} className="flex-1 bg-background/50 rounded-lg px-2 py-1.5 border border-border/80"><option value="">— none —</option>{demandNodes.map(nodeOpt)}</select><input placeholder="MT/day" value={flowVal} onChange={e => setFlowVal(e.target.value)} type="number" className="w-24 bg-background/50 rounded-lg px-2 py-1.5 border border-border/80" /></div>
+              <div className="flex gap-2 mt-1"><select value={flowNode} onChange={e => setFlowNode(e.target.value)} className="flex-1 bg-background/50 rounded-md px-2 py-1.5 border border-border/80"><option value="">— none —</option>{demandNodes.map(nodeOpt)}</select><input placeholder="MT/day" value={flowVal} onChange={e => setFlowVal(e.target.value)} type="number" className="w-24 bg-background/50 rounded-md px-2 py-1.5 border border-border/80" /></div>
             </div>
             <div>
               <label className="text-[11px] text-muted-foreground">Spot / emergency cargo</label>
-              <div className="flex gap-2 mt-1"><select value={spotNode} onChange={e => setSpotNode(e.target.value)} className="flex-1 bg-background/50 rounded-lg px-2 py-1.5 border border-border/80"><option value="">— none —</option>{demandNodes.map(nodeOpt)}</select><input value={spotQty} onChange={e => setSpotQty(e.target.value)} type="number" className="w-20 bg-background/50 rounded-lg px-2 py-1.5 border border-border/80" title="qty MT" /><input value={spotDay} onChange={e => setSpotDay(e.target.value)} type="number" className="w-14 bg-background/50 rounded-lg px-2 py-1.5 border border-border/80" title="by day" /></div>
+              <div className="flex gap-2 mt-1"><select value={spotNode} onChange={e => setSpotNode(e.target.value)} className="flex-1 bg-background/50 rounded-md px-2 py-1.5 border border-border/80"><option value="">— none —</option>{demandNodes.map(nodeOpt)}</select><input value={spotQty} onChange={e => setSpotQty(e.target.value)} type="number" className="w-20 bg-background/50 rounded-md px-2 py-1.5 border border-border/80" title="qty MT" /><input value={spotDay} onChange={e => setSpotDay(e.target.value)} type="number" className="w-14 bg-background/50 rounded-md px-2 py-1.5 border border-border/80" title="by day" /></div>
             </div>
             <div>
               <label className="text-[11px] text-muted-foreground">Port / berth closure</label>
-              <div className="flex gap-2 mt-1"><select value={closureLoc} onChange={e => setClosureLoc(e.target.value)} className="flex-1 bg-background/50 rounded-lg px-2 py-1.5 border border-border/80"><option value="">— none —</option>{data.locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}</select><input value={closeFrom} onChange={e => setCloseFrom(e.target.value)} type="number" className="w-14 bg-background/50 rounded-lg px-2 py-1.5 border border-border/80" title="from day" /><input value={closeTo} onChange={e => setCloseTo(e.target.value)} type="number" className="w-14 bg-background/50 rounded-lg px-2 py-1.5 border border-border/80" title="to day" /></div>
+              <div className="flex gap-2 mt-1"><select value={closureLoc} onChange={e => setClosureLoc(e.target.value)} className="flex-1 bg-background/50 rounded-md px-2 py-1.5 border border-border/80"><option value="">— none —</option>{data.locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}</select><input value={closeFrom} onChange={e => setCloseFrom(e.target.value)} type="number" className="w-14 bg-background/50 rounded-md px-2 py-1.5 border border-border/80" title="from day" /><input value={closeTo} onChange={e => setCloseTo(e.target.value)} type="number" className="w-14 bg-background/50 rounded-md px-2 py-1.5 border border-border/80" title="to day" /></div>
             </div>
             <div>
               <label className="text-[11px] text-muted-foreground">Vessel off-hire / diverted</label>
-              <div className="flex flex-wrap gap-1 mt-1 max-h-20 overflow-auto">{data.vessels.filter(v => v.pool !== 'SPOT').map(v => (<button key={v.id} onClick={() => toggleVessel(v.id)} className={`px-2 py-1 rounded-md border text-[10px] ${vesselOut.has(v.id) ? 'bg-red-500/15 text-red-400 border-red-500/30' : 'bg-background/50 border-border/70 text-muted-foreground hover:text-foreground/80'}`}>{v.name}</button>))}</div>
+              <div className="flex flex-wrap gap-1 mt-1 max-h-20 overflow-auto">{data.vessels.filter(v => v.pool !== 'SPOT').map(v => (<button key={v.id} onClick={() => toggleVessel(v.id)} className={`px-2 py-1 rounded-md border text-[10px] ${vesselOut.has(v.id) ? 'bg-bad/15 text-bad border-bad/30' : 'bg-background/50 border-border/70 text-muted-foreground hover:text-foreground/80'}`}>{v.name}</button>))}</div>
             </div>
-            {events.length > 0 && <div className="flex flex-wrap gap-1 pt-1">{events.map((e, i) => <span key={i} className="px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[10px]">{e}</span>)}</div>}
+            {events.length > 0 && <div className="flex flex-wrap gap-1 pt-1">{events.map((e, i) => <span key={i} className="px-2 py-0.5 rounded-full bg-warn/10 text-warn border border-warn/20 text-[10px]">{e}</span>)}</div>}
             <div className="flex gap-2 pt-1">
-              <button disabled={busy || !hasEvents} onClick={doCheck} className="px-3 py-1.5 bg-muted hover:bg-accent border border-border/80 rounded-lg disabled:opacity-50">Check impact</button>
-              <button disabled={busy || !hasEvents} onClick={doSimulate} className="px-3 py-1.5 bg-sky-600 hover:bg-sky-500 text-white rounded-lg disabled:opacity-50">{busy ? 'Solving…' : 'Simulate recovery (draft)'}</button>
+              <button disabled={busy || !hasEvents} onClick={doCheck} className="px-3 py-1.5 bg-muted hover:bg-accent border border-border/80 rounded-md disabled:opacity-50">Check impact</button>
+              <button disabled={busy || !hasEvents} onClick={doSimulate} className="px-3 py-1.5 bg-primary hover:bg-primary/90 text-primary-foreground rounded-md disabled:opacity-50">{busy ? 'Solving…' : 'Simulate recovery (draft)'}</button>
             </div>
           </CardContent>
         </Card>
 
         {/* Draft recovery result */}
-        <Card className={`bg-card/50 rounded-lg ${draft ? 'border-sky-500/30' : 'border-border/80'}`}>
+        <Card className={`bg-card/50 rounded-md ${draft ? 'border-cyan-500/30' : 'border-border/80'}`}>
           <CardHeader className="py-2.5 px-4 border-b border-border/60"><CardTitle className="text-xs font-semibold text-foreground/80">Recovery draft</CardTitle></CardHeader>
           <CardContent className="p-3 text-xs">
-            {!draft ? <div className="text-muted-foreground p-2">Compose events and simulate — the recovery is saved as a <span className="text-sky-300">draft</span>; your operating plan is untouched until you publish.</div> : (
+            {!draft ? <div className="text-muted-foreground p-2">Compose events and simulate — the recovery is saved as a <span className="text-cyan-300">draft</span>; your operating plan is untouched until you publish.</div> : (
               <div className="space-y-3">
                 <div className="grid grid-cols-2 gap-2">
                   {[['Served', `${draft.kpis.demandServedPct}%`], ['Total cost', money(draft.kpis.totalCost)], ['Voyages', String(draft.kpis.voyageCount)], ['Charter recs', String(draft.kpis.charterRecommendationCount)]].map(([l, v]) => (
-                    <div key={l} className="bg-background/50 p-2 rounded-lg border border-border/70 text-center"><div className="text-[10px] text-muted-foreground">{l}</div><div className="text-sm font-semibold text-foreground mt-0.5">{v}</div></div>
+                    <div key={l} className="bg-background/50 p-2 rounded-md border border-border/70 text-center"><div className="text-[10px] text-muted-foreground">{l}</div><div className="text-sm font-semibold text-foreground mt-0.5">{v}</div></div>
                   ))}
                 </div>
                 {draft.changeSet && (
-                  <div className="rounded-lg border border-border/70 bg-background/40 p-2.5">
+                  <div className="rounded-md border border-border/70 bg-background/40 p-2.5">
                     <div className="text-[11px] font-medium text-foreground/80 mb-1">Change vs operating plan {draft.diff && <span className="text-muted-foreground">(cost {fmtM(draft.diff.costDelta)})</span>}</div>
                     <div className="flex flex-wrap gap-1.5 text-[10px]">
-                      <span className="px-2 py-0.5 rounded-full bg-sky-500/10 text-sky-400 border border-sky-500/20 flex items-center gap-1"><Snowflake className="w-3 h-3" />{draft.changeSet.frozen} kept</span>
-                      <span className="px-2 py-0.5 rounded-full bg-red-500/10 text-red-400 border border-red-500/20">−{draft.changeSet.removed} removed</span>
-                      <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1"><Plus className="w-3 h-3" />{draft.changeSet.added} added</span>
-                      <span className="px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 flex items-center gap-1"><Anchor className="w-3 h-3" />{draft.changeSet.spotAdded} spot</span>
+                      <span className="px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 flex items-center gap-1"><Snowflake className="w-3 h-3" />{draft.changeSet.frozen} kept</span>
+                      <span className="px-2 py-0.5 rounded-full bg-bad/10 text-bad border border-bad/20">−{draft.changeSet.removed} removed</span>
+                      <span className="px-2 py-0.5 rounded-full bg-ok/10 text-ok border border-ok/20 flex items-center gap-1"><Plus className="w-3 h-3" />{draft.changeSet.added} added</span>
+                      <span className="px-2 py-0.5 rounded-full bg-warn/10 text-warn border border-warn/20 flex items-center gap-1"><Anchor className="w-3 h-3" />{draft.changeSet.spotAdded} spot</span>
                     </div>
                     <div className="mt-2 max-h-36 overflow-auto space-y-1">
                       {(draft.changeSet.removedVoyages ?? []).map((v: any, i: number) => (
-                        <div key={`r${i}`} className="flex justify-between bg-red-500/5 rounded px-2 py-1 border border-red-500/15">
-                          <span className="text-foreground/70"><span className="text-red-400 mr-1">−</span>{v.vesselName} <span className={v.pool === 'SPOT' ? 'text-amber-400' : 'text-muted-foreground'}>{v.pool}</span></span>
+                        <div key={`r${i}`} className="flex justify-between bg-bad/5 rounded-md px-2 py-1 border border-bad/15">
+                          <span className="text-foreground/70"><span className="text-bad mr-1">−</span>{v.vesselName} <span className={v.pool === 'SPOT' ? 'text-warn' : 'text-muted-foreground'}>{v.pool}</span></span>
                           <span className="text-muted-foreground">{loc(v.from)} → {loc(v.to)}</span>
                         </div>
                       ))}
                       {draft.changeSet.addedVoyages.map((v: any, i: number) => (
-                        <div key={`a${i}`} className="flex justify-between bg-emerald-500/5 rounded px-2 py-1 border border-emerald-500/15">
-                          <span className="text-foreground/80"><span className="text-emerald-400 mr-1">+</span>{v.vesselName} <span className={v.pool === 'SPOT' ? 'text-amber-400' : 'text-muted-foreground'}>{v.pool}</span></span>
+                        <div key={`a${i}`} className="flex justify-between bg-ok/5 rounded-md px-2 py-1 border border-ok/15">
+                          <span className="text-foreground/80"><span className="text-ok mr-1">+</span>{v.vesselName} <span className={v.pool === 'SPOT' ? 'text-warn' : 'text-muted-foreground'}>{v.pool}</span></span>
                           <span className="text-muted-foreground">{loc(v.from)} → {loc(v.to)} · {money(v.cost)}</span>
                         </div>
                       ))}
@@ -168,8 +168,8 @@ export default function ReplanningView({ data, stream, refresh }: { data: Dashbo
                   </div>
                 )}
                 <div className="flex gap-2">
-                  <button onClick={() => publish(draft.versionId)} className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs">Publish as operating plan</button>
-                  <button onClick={() => discard(draft.versionId)} className="px-3 py-1.5 bg-muted hover:bg-accent border border-border/80 rounded-lg text-xs">Discard draft</button>
+                  <button onClick={() => publish(draft.versionId)} className="px-3 py-1.5 bg-ok hover:bg-ok/90 text-background rounded-md text-xs">Publish as operating plan</button>
+                  <button onClick={() => discard(draft.versionId)} className="px-3 py-1.5 bg-muted hover:bg-accent border border-border/80 rounded-md text-xs">Discard draft</button>
                 </div>
               </div>
             )}
@@ -178,14 +178,14 @@ export default function ReplanningView({ data, stream, refresh }: { data: Dashbo
       </div>
 
       {/* Version history */}
-      <Card className="bg-card/50 border-border/80 rounded-lg">
+      <Card className="bg-card/50 border-border/80 rounded-md">
         <CardHeader className="py-3 px-4 border-b border-border/60 flex flex-row items-center justify-between">
           <CardTitle className="text-sm font-semibold text-foreground/80">Plan versions ({versions.length})</CardTitle>
           <div className="flex items-center gap-2">
-            <select value={a} onChange={e => setA(e.target.value)} className="bg-background/50 text-[11px] rounded-lg px-2 py-1 border border-border/80">{versions.map(v => <option key={v.id} value={v.id}>v{v.version}</option>)}</select>
+            <select value={a} onChange={e => setA(e.target.value)} className="bg-background/50 text-[11px] rounded-md px-2 py-1 border border-border/80">{versions.map(v => <option key={v.id} value={v.id}>v{v.version}</option>)}</select>
             <span className="text-muted-foreground text-[11px]">vs</span>
-            <select value={b} onChange={e => setB(e.target.value)} className="bg-background/50 text-[11px] rounded-lg px-2 py-1 border border-border/80">{versions.map(v => <option key={v.id} value={v.id}>v{v.version}</option>)}</select>
-            <button onClick={compare} className="px-2.5 py-1 bg-muted hover:bg-accent border border-border/80 rounded-lg text-[11px] flex items-center gap-1"><GitCompare className="w-3 h-3" /> Compare</button>
+            <select value={b} onChange={e => setB(e.target.value)} className="bg-background/50 text-[11px] rounded-md px-2 py-1 border border-border/80">{versions.map(v => <option key={v.id} value={v.id}>v{v.version}</option>)}</select>
+            <button onClick={compare} className="px-2.5 py-1 bg-muted hover:bg-accent border border-border/80 rounded-md text-[11px] flex items-center gap-1"><GitCompare className="w-3 h-3" /> Compare</button>
           </div>
         </CardHeader>
         {cmp?.delta && <div className="px-4 py-2 border-b border-border/50 grid grid-cols-4 gap-2 text-center bg-background/30">
@@ -197,14 +197,14 @@ export default function ReplanningView({ data, stream, refresh }: { data: Dashbo
               <div key={v.id} className="flex items-center justify-between px-4 py-2.5 text-xs hover:bg-muted/20">
                 <button onClick={() => openVersion(v.id, v.version)} className="flex items-center gap-3 text-left">
                   <span className="font-mono text-foreground/90">v{v.version}</span>
-                  <span className={`px-1.5 py-0.5 rounded text-[9px] ${v.status === 'Active' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : v.status === 'Draft' ? 'bg-sky-500/10 text-sky-300 border border-sky-500/20' : 'bg-muted text-muted-foreground border border-border/60'}`}>{v.status}</span>
+                  <span className={`px-1.5 py-0.5 rounded-md text-[9px] ${v.status === 'Active' ? 'bg-ok/10 text-ok border border-ok/20' : v.status === 'Draft' ? 'bg-cyan-500/10 text-cyan-300 border border-cyan-500/20' : 'bg-muted text-muted-foreground border border-border/60'}`}>{v.status}</span>
                   <span className="text-muted-foreground">{v.trigger}</span>
-                  <span className={v.achievable ? 'text-emerald-400' : 'text-red-400'}>{v.achievable ? 'achievable' : 'shortfall'}</span>
+                  <span className={v.achievable ? 'text-ok' : 'text-bad'}>{v.achievable ? 'achievable' : 'shortfall'}</span>
                 </button>
                 <div className="flex items-center gap-3">
                   <span className="font-mono text-foreground/80">₹{(v.objectiveCost / 1e6).toFixed(1)}M</span>
-                  {v.status === 'Draft' && <><button onClick={() => publish(v.id)} className="px-2 py-0.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-[10px]">Publish</button><button onClick={() => discard(v.id)} className="px-2 py-0.5 rounded bg-muted border border-border/70 text-[10px]">Discard</button></>}
-                  {v.status === 'Superseded' && <button onClick={() => rollback(v.id)} className="px-2 py-0.5 rounded bg-muted hover:bg-accent border border-border/70 text-[10px]">Roll back</button>}
+                  {v.status === 'Draft' && <><button onClick={() => publish(v.id)} className="px-2 py-0.5 rounded-md bg-ok hover:bg-ok/90 text-background text-[10px]">Publish</button><button onClick={() => discard(v.id)} className="px-2 py-0.5 rounded-md bg-muted border border-border/70 text-[10px]">Discard</button></>}
+                  {v.status === 'Superseded' && <button onClick={() => rollback(v.id)} className="px-2 py-0.5 rounded-md bg-muted hover:bg-accent border border-border/70 text-[10px]">Roll back</button>}
                 </div>
               </div>
             ))}
@@ -217,8 +217,8 @@ export default function ReplanningView({ data, stream, refresh }: { data: Dashbo
         {versionVoyages && <div className="space-y-1.5">
           {versionVoyages.voyages.length === 0 ? <div className="text-xs text-muted-foreground">No voyages.</div> :
             versionVoyages.voyages.map(v => (
-              <button key={v.id} onClick={() => setVoyageModal(v)} className="w-full text-left flex items-center justify-between bg-background/50 rounded-lg border border-border/70 px-3 py-2 text-xs hover:border-sky-500/40">
-                <span className="flex items-center gap-2"><Ship className="w-3.5 h-3.5 text-sky-400" /> <span className="font-mono text-foreground/90">{v.vesselName}</span> <span className={v.pool === 'SPOT' ? 'text-amber-400' : 'text-muted-foreground'}>{v.pool}</span></span>
+              <button key={v.id} onClick={() => setVoyageModal(v)} className="w-full text-left flex items-center justify-between bg-background/50 rounded-md border border-border/70 px-3 py-2 text-xs hover:border-cyan-500/40">
+                <span className="flex items-center gap-2"><Ship className="w-3.5 h-3.5 text-cyan-400" /> <span className="font-mono text-foreground/90">{v.vesselName}</span> <span className={v.pool === 'SPOT' ? 'text-warn' : 'text-muted-foreground'}>{v.pool}</span></span>
                 <span className="text-muted-foreground">{v.stops.length} stops · {money(v.cost)} ›</span>
               </button>
             ))}
