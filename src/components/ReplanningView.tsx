@@ -121,7 +121,7 @@ export default function ReplanningView({ data, stream, refresh }: { data: Dashbo
             </div>
             <div>
               <label className="text-[11px] text-muted-foreground">Vessel off-hire / diverted</label>
-              <div className="flex flex-wrap gap-1 mt-1 max-h-20 overflow-auto">{data.vessels.filter(v => v.pool !== 'SPOT').map(v => (<button key={v.id} onClick={() => toggleVessel(v.id)} className={`px-2 py-1 rounded-md border text-[10px] ${vesselOut.has(v.id) ? 'bg-bad/15 text-bad border-bad/30' : 'bg-background/50 border-border/70 text-muted-foreground hover:text-foreground/80'}`}>{v.name}</button>))}</div>
+              <div className="flex flex-wrap gap-1 mt-1 max-h-40 overflow-auto">{data.vessels.filter(v => v.pool !== 'SPOT').map(v => (<button key={v.id} onClick={() => toggleVessel(v.id)} className={`px-2 py-1 rounded-md border text-[10px] ${vesselOut.has(v.id) ? 'bg-bad/15 text-bad border-bad/30' : 'bg-background/50 border-border/70 text-muted-foreground hover:text-foreground/80'}`}>{v.name}</button>))}</div>
             </div>
             {events.length > 0 && <div className="flex flex-wrap gap-1 pt-1">{events.map((e, i) => <span key={i} className="px-2 py-0.5 rounded-full bg-warn/10 text-warn border border-warn/20 text-[10px]">{e}</span>)}</div>}
             <div className="flex gap-2 pt-1">

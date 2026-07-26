@@ -23,7 +23,7 @@ export default function SchedulerView({ data, onOptimize, optimizing }: { data: 
   const primaryProduct = (v: Voyage) => v.stops.flatMap(s => s.ops).find(o => o.op === 'LOAD')?.productId;
 
   return (
-    <div className="space-y-5 flex flex-col flex-1 min-h-0">
+    <div className="space-y-5">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <h3 className="font-serif text-2xl font-medium text-foreground">Operational movement plan</h3>
@@ -62,7 +62,7 @@ export default function SchedulerView({ data, onOptimize, optimizing }: { data: 
       {data.charterRecommendations?.length > 0 && (
         <Card className="bg-card/50 border-warn/30 rounded-md">
           <CardHeader className="py-2.5 px-4 bg-warn/10 border-b border-warn/20"><CardTitle className="text-xs font-semibold text-warn">Voyage-charter recommendations ({data.charterRecommendations.length})</CardTitle></CardHeader>
-          <CardContent className="p-3 space-y-2 max-h-52 overflow-auto">
+          <CardContent className="p-3 space-y-2 max-h-96 overflow-auto">
             {data.charterRecommendations.slice(0, 20).map((r, i) => (
               <div key={i} className="flex justify-between items-center gap-3 bg-background/50 p-2.5 rounded-md border border-border/80 text-xs">
                 <div>
@@ -107,9 +107,9 @@ export default function SchedulerView({ data, onOptimize, optimizing }: { data: 
       )}
 
       {voyages.length > 0 && (
-      <Card className="flex-1 min-h-[300px] flex flex-col overflow-hidden bg-card/50 border-border/80 rounded-md">
+      <Card className="min-h-[300px] flex flex-col overflow-hidden bg-card/50 border-border/80 rounded-md">
         <CardHeader className="py-2.5 px-4 border-b border-border/60 bg-card/80"><CardTitle className="text-sm font-semibold text-foreground/80">Vessel voyages — ballast → load(s) → discharge(s) → empty ({voyages.length})</CardTitle></CardHeader>
-        <CardContent className="flex-1 p-0 overflow-auto">
+        <CardContent className="p-0 overflow-auto max-h-[70vh]">
           {/* Day axis */}
           <div className="flex border-b border-border/60 bg-background/50 sticky top-0 z-10">
             <div className="w-44 p-2 text-[11px] font-medium text-muted-foreground/80 border-r border-border/60 shrink-0">Vessel</div>
