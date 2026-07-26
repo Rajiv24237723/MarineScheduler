@@ -6,3 +6,9 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# local sqlite — regenerated from seed.ts on server startup (empty DB auto-seeds)
+marine.db
+marine.db-journal
+marine.db-wal
+marine.db-shm
