@@ -12,8 +12,11 @@ export default function InventoryView({ data, goto, focus }: { data: DashboardDa
   const projections = data.projection ?? [];
   const [key, setKey] = useState<string>(projections[0] ? `${projections[0].locationId}|${projections[0].productId}` : '');
   const [openTank, setOpenTank] = useState<Tank | null>(null);
-  // Land focused on a node when navigated here from another card.
-  useEffect(() => { if (focus?.node) setKey(`${focus.node.loc}|${focus.node.product}`); }, [focus]);
+  // Land focused on a node (or the first node at a location) when navigated here.
+  useEffect(() => {
+    if (focus?.node) setKey(`${focus.node.loc}|${focus.node.product}`);
+    else if (focus?.locationId) { const p = projections.find(x => x.locationId === focus.locationId); if (p) setKey(`${p.locationId}|${p.productId}`); }
+  }, [focus]);
   const tankFor = (loc: string, pid: string) => data.tanks.find(t => t.locationId === loc && t.productId === pid) ?? null;
   const sel = projections.find(p => `${p.locationId}|${p.productId}` === key) ?? projections[0];
 

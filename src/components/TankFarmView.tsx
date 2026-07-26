@@ -83,7 +83,7 @@ export default function TankFarmView({ data, goto, focus }: { data: DashboardDat
 
       {[...byLoc.entries()].map(([locId, tanks]) => (
         <Card key={locId} className="bg-card/50 border-border/80 rounded-md">
-          <CardHeader className="py-2.5 px-4 border-b border-border/60"><CardTitle className="text-sm font-semibold text-foreground/80">{loc(locId)}</CardTitle></CardHeader>
+          <CardHeader className="py-2.5 px-4 border-b border-border/60"><CardTitle className="text-sm font-semibold text-foreground/80"><button onClick={() => goto?.('inventory', { locationId: locId })} className="hover:text-cyan-300">{loc(locId)}</button></CardTitle></CardHeader>
           <CardContent className="p-4 grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-3">
             {tanks.map(t => {
               const inc = incFor(t);

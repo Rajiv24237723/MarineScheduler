@@ -57,8 +57,8 @@ export interface DashboardData {
   versions: VersionSummary[];
 }
 
-/** Cross-view navigation context: land on a tab focused on a specific node or tank. */
-export type Focus = { node?: { loc: string; product: string }; tankId?: string } | null;
+/** Cross-view navigation context: land on a tab focused on a specific entity. */
+export type Focus = { node?: { loc: string; product: string }; tankId?: string; vesselId?: string; locationId?: string } | null;
 export type Goto = (tab: string, focus?: Focus) => void;
 
 export const START_DATE = new Date('2026-07-01T00:00:00Z');

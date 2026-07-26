@@ -1,5 +1,5 @@
 ﻿import { useState } from 'react';
-import { Voyage, Location, Product, Vessel } from '../types';
+import { Voyage, Location, Product, Vessel, Focus } from '../types';
 import { VesselStowage } from './ui/VesselStowage';
 import { format, addDays } from 'date-fns';
 
@@ -8,7 +8,7 @@ const fmtM = (n: number) => `₹${(n / 1e6).toFixed(1)}M`;
 
 /** Shared voyage-detail body: cargo stowage manifest + current on-board inventory,
  *  cost breakdown, route, legs. Used by the Scheduler, Live Fleet map, version modals. */
-export function VoyageDetail({ voyage, locations, products, vessels = [] }: { voyage: Voyage; locations: Location[]; products: Product[]; vessels?: Vessel[] }) {
+export function VoyageDetail({ voyage, locations, products, vessels = [], onNavigate }: { voyage: Voyage; locations: Location[]; products: Product[]; vessels?: Vessel[]; onNavigate?: (tab: string, focus?: Focus) => void }) {
   const loc = (id: string) => locations.find(l => l.id === id)?.name ?? id;
   const prod = (id: string) => products.find(p => p.id === id);
   const vessel = vessels.find(v => v.id === voyage.vesselId || v.name === voyage.vesselName);
@@ -42,7 +42,7 @@ export function VoyageDetail({ voyage, locations, products, vessels = [] }: { vo
       {vessel && (
         <div>
           <div className="flex items-center justify-between mb-1.5">
-            <div className="text-[11px] font-medium text-muted-foreground">Cargo stowage — {vessel.name} ({vessel.class}, {vessel.service ?? 'CLEAN'})</div>
+            <div className="text-[11px] font-medium text-muted-foreground flex items-center gap-2">Cargo stowage — {vessel.name} ({vessel.class}, {vessel.service ?? 'CLEAN'}){onNavigate && <button onClick={() => onNavigate('master', { vesselId: vessel.id })} className="text-cyan-400 hover:text-cyan-300 font-normal">record →</button>}</div>
             <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
               <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-md bg-white/60" /> on board</span>
               <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-md border border-white/40" /> manifest</span>
@@ -76,7 +76,7 @@ export function VoyageDetail({ voyage, locations, products, vessels = [] }: { vo
           {voyage.stops.map(s => (
             <div key={s.seq} className="flex items-center gap-2 bg-background/50 rounded-md border border-border/60 px-3 py-1.5 text-xs">
               <span className="px-1.5 py-0.5 rounded-md text-[9px] font-medium" style={{ background: s.kind === 'LOAD' ? 'color-mix(in srgb, var(--sea-sand) 16%, transparent)' : 'color-mix(in srgb, var(--sea-green) 16%, transparent)', color: s.kind === 'LOAD' ? 'var(--sea-sand)' : 'var(--sea-green)' }}>{s.kind}</span>
-              <span className="text-foreground/90 flex-1">{loc(s.locationId)}</span>
+              {onNavigate ? <button onClick={() => onNavigate('inventory', { locationId: s.locationId })} className="text-foreground/90 flex-1 text-left hover:text-cyan-300">{loc(s.locationId)}</button> : <span className="text-foreground/90 flex-1">{loc(s.locationId)}</span>}
               <span className="text-muted-foreground">{format(addDays(START, s.arriveDay), 'MMM d')}</span>
               <span className="text-foreground/70 font-mono text-[10px]">{s.ops.map(o => `${prod(o.productId)?.name} ${(o.qty / 1000).toFixed(0)}k→${o.compartmentId}`).join(' · ')}</span>
             </div>

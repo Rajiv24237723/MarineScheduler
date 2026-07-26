@@ -239,12 +239,12 @@ export default function App() {
         <main className="flex-1 overflow-auto p-8 relative z-10 flex flex-col">
           <div key={activeTab} className="animate-fade-in-up flex-1 flex flex-col min-h-0">
             {activeTab === 'dashboard' && <DashboardView data={data} onGoto={goto} />}
-            {activeTab === 'scheduler' && <SchedulerView data={data} stream={stream} onOptimize={runOptimize} optimizing={optimizing} />}
+            {activeTab === 'scheduler' && <SchedulerView data={data} stream={stream} onOptimize={runOptimize} optimizing={optimizing} goto={goto} />}
             {activeTab === 'inventory' && <InventoryView data={data} goto={goto} focus={focus} />}
             {activeTab === 'tanks' && <TankFarmView data={data} goto={goto} focus={focus} />}
-            {activeTab === 'tracking' && <TrackingView data={data} />}
+            {activeTab === 'tracking' && <TrackingView data={data} goto={goto} />}
             {activeTab === 'replan' && <ReplanningView data={data} stream={stream} refresh={load} />}
-            {activeTab === 'master' && <MasterDataView stream={stream} data={data} refresh={load} />}
+            {activeTab === 'master' && <MasterDataView stream={stream} data={data} refresh={load} focus={focus} />}
             {activeTab === 'settings' && <SettingsView data={data} stream={stream} attempts={attempts} setAttempts={setAttempts} onReseed={reseed} />}
           </div>
         </main>

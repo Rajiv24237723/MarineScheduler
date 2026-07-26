@@ -1,5 +1,5 @@
 ﻿import { useState } from 'react';
-import { DashboardData, Voyage } from '../types';
+import { DashboardData, Voyage, Goto } from '../types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Modal } from '@/components/ui/modal';
 import { Pennant } from '@/components/ui/SignalFlag';
@@ -10,7 +10,7 @@ import { format, addDays } from 'date-fns';
 const START = new Date('2026-07-01T00:00:00Z');
 const fmtM = (n: number) => `₹${(n / 1e6).toFixed(1)}M`;
 
-export default function SchedulerView({ data, onOptimize, optimizing }: { data: DashboardData; stream: string; onOptimize: () => void; optimizing: boolean }) {
+export default function SchedulerView({ data, onOptimize, optimizing, goto }: { data: DashboardData; stream: string; onOptimize: () => void; optimizing: boolean; goto?: Goto }) {
   const [modalVoyage, setModalVoyage] = useState<Voyage | null>(null);
   const prod = (id: string) => data.products.find(p => p.id === id);
   const loc = (id: string) => data.locations.find(l => l.id === id)?.name ?? id;
@@ -67,7 +67,7 @@ export default function SchedulerView({ data, onOptimize, optimizing }: { data: 
               <div key={i} className="flex justify-between items-center gap-3 bg-background/50 p-2.5 rounded-md border border-border/80 text-xs">
                 <div>
                   <div className="text-foreground/90"><span className="text-warn font-medium">Charter {r.vesselClass}</span> · {prod(r.productId)?.name ?? r.productId} {r.qty ? `${Math.round(r.qty / 1000)}k MT` : ''}</div>
-                  <div className="text-[11px] text-muted-foreground mt-0.5">{r.fromLoc ? loc(r.fromLoc) : 'source'} → {loc(r.toLoc)} · by {format(addDays(START, r.byDay || 0), 'MMM d')}</div>
+                  <div className="text-[11px] text-muted-foreground mt-0.5">{r.fromLoc ? loc(r.fromLoc) : 'source'} → <button onClick={() => goto?.('inventory', { node: { loc: r.toLoc, product: r.productId } })} className="hover:text-cyan-300 underline-offset-2 hover:underline">{loc(r.toLoc)}</button> · by {format(addDays(START, r.byDay || 0), 'MMM d')}</div>
                 </div>
                 {r.estCost > 0 && <span className="font-mono text-warn whitespace-nowrap">{fmtM(r.estCost)}</span>}
               </div>
@@ -149,7 +149,7 @@ export default function SchedulerView({ data, onOptimize, optimizing }: { data: 
       <Modal open={!!modalVoyage} onClose={() => setModalVoyage(null)}
         title={modalVoyage ? `${modalVoyage.vesselName} · ${modalVoyage.vesselClass}` : ''}
         subtitle={modalVoyage ? `${modalVoyage.pool} · days ${modalVoyage.startDay}–${modalVoyage.endDay} · ${fmtM(modalVoyage.cost)}` : ''} width="max-w-3xl">
-        {modalVoyage && <VoyageDetail voyage={modalVoyage} locations={data.locations} products={data.products} vessels={data.vessels} />}
+        {modalVoyage && <VoyageDetail voyage={modalVoyage} locations={data.locations} products={data.products} vessels={data.vessels} onNavigate={(tab, f) => { setModalVoyage(null); goto?.(tab, f); }} />}
       </Modal>
     </div>
   );

@@ -1,4 +1,4 @@
-﻿import { DashboardData, Voyage } from '../types';
+﻿import { DashboardData, Voyage, Goto } from '../types';
 import { Card, CardContent } from '@/components/ui/card';
 import { Modal } from '@/components/ui/modal';
 import { VoyageDetail } from './VoyageDetail';
@@ -20,7 +20,7 @@ const START = new Date('2026-07-01T00:00:00Z');
 const portIcon = new L.DivIcon({ html: `<div style="width:12px;height:12px;background:#6366f1;border:2px solid #0b1220;border-radius:9999px"></div>`, className: '', iconSize: [12, 12], iconAnchor: [6, 6] });
 const vesselIcon = new L.DivIcon({ html: `<div style="color:#f59e0b;background:rgba(11,18,32,.85);border-radius:9999px;padding:3px;border:1px solid rgba(245,158,11,.5)"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="3 11 22 2 13 21 11 13 3 11"/></svg></div>`, className: '', iconSize: [20, 20], iconAnchor: [10, 10] });
 
-export default function TrackingView({ data }: { data: DashboardData }) {
+export default function TrackingView({ data, goto }: { data: DashboardData; goto?: Goto }) {
   const [weather, setWeather] = useState<any>(null);
   const [modalVoyage, setModalVoyage] = useState<Voyage | null>(null);
   const maxDay = Math.max(31, ...(data.voyages ?? []).map(v => v.endDay));
@@ -94,7 +94,7 @@ export default function TrackingView({ data }: { data: DashboardData }) {
       <Modal open={!!modalVoyage} onClose={() => setModalVoyage(null)}
         title={modalVoyage ? `${modalVoyage.vesselName} · ${modalVoyage.vesselClass}` : ''}
         subtitle={modalVoyage ? `${modalVoyage.pool} · voyage days ${modalVoyage.startDay}–${modalVoyage.endDay}` : ''} width="max-w-3xl">
-        {modalVoyage && <VoyageDetail voyage={modalVoyage} locations={data.locations} products={data.products} vessels={data.vessels} />}
+        {modalVoyage && <VoyageDetail voyage={modalVoyage} locations={data.locations} products={data.products} vessels={data.vessels} onNavigate={(tab, f) => { setModalVoyage(null); goto?.(tab, f); }} />}
       </Modal>
     </div>
   );

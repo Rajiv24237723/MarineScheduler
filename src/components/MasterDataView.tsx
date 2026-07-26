@@ -1,9 +1,9 @@
-﻿import { useState } from 'react';
+﻿import { useState, useEffect } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Modal } from '@/components/ui/modal';
 import { toast } from './ui/toast';
 import { Plus, Trash2, Maximize2, Upload, Download } from 'lucide-react';
-import { DashboardData, Vessel } from '../types';
+import { DashboardData, Vessel, Focus } from '../types';
 
 const fmtM = (n: number) => `₹${(n / 1e6).toFixed(1)}M`;
 
@@ -70,9 +70,11 @@ function parseCSV(text: string, cols: Col[], stream: string): any[] {
   });
 }
 
-export default function MasterDataView({ stream, data, refresh }: { stream: string; data: DashboardData; refresh: () => Promise<void> }) {
+export default function MasterDataView({ stream, data, refresh, focus }: { stream: string; data: DashboardData; refresh: () => Promise<void>; focus?: Focus }) {
   const [tab, setTab] = useState('Products');
   const [vesselDetail, setVesselDetail] = useState<Vessel | null>(null);
+  // Open a specific vessel record when navigated here from a voyage card.
+  useEffect(() => { if (focus?.vesselId) { const v = data.vessels.find(x => x.id === focus.vesselId); if (v) { setTab('Vessels'); setVesselDetail(v); } } }, [focus, data.vessels]);
   const [importOpen, setImportOpen] = useState(false);
   const [csvText, setCsvText] = useState('');
   const [importing, setImporting] = useState(false);
