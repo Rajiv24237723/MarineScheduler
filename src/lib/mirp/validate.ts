@@ -4,7 +4,8 @@ import { InventoryModel } from './inventory';
 /**
  * Independent hard-constraint re-check (spec §8) — rebuilds inventory from the
  * returned voyages and verifies no dry-out / tank-top, compartment capacity, and
- * laden-draft admissibility. Runs separately from the solver's own bookkeeping.
+ * draft admissibility (load-dependent: a part-laden vessel may call a shallower port).
+ * Runs separately from the solver's own bookkeeping.
  */
 export function validate(input: EngineInput, voyages: Voyage[]): { ok: boolean; breaches: string[] } {
   const breaches: string[] = [];
@@ -18,11 +19,18 @@ export function validate(input: EngineInput, voyages: Voyage[]): { ok: boolean; 
   for (const voy of voyages) {
     const v = vesselByName.get(voy.vesselName);
     const capById = new Map((v?.compartments ?? []).map(c => [c.id, c.cap]));
+    const totalCap = Math.max(1, (v?.compartments ?? []).reduce((s, c) => s + c.cap, 0));
+    // Draft alongside scales with cargo aboard: ballast → laden across the compartment fill.
+    const draftAt = (aboard: number) => v ? v.draftBallast + (v.draftLaden - v.draftBallast) * Math.min(1, Math.max(0, aboard) / totalCap) : 0;
+    let aboard = 0;
     for (const stop of voy.stops) {
-      // Draft
+      const loadHere = stop.ops.filter(o => o.op === 'LOAD').reduce((s, o) => s + o.qty, 0);
+      const dischHere = stop.ops.filter(o => o.op === 'DISCHARGE').reduce((s, o) => s + o.qty, 0);
+      // Draft — check the deepest condition while alongside (after loading here / on arrival to discharge).
       const bs = berthsByLoc.get(stop.locationId);
-      if (v && bs && bs.length && !bs.some(b => b.maxDraft >= v.draftLaden))
-        breaches.push(`Draft: ${voy.vesselName} (${v.draftLaden}m) cannot berth at ${locName.get(stop.locationId) ?? stop.locationId}`);
+      const dHere = draftAt(aboard + loadHere);
+      if (v && bs && bs.length && !bs.some(b => b.maxDraft >= dHere - 1e-6))
+        breaches.push(`Draft: ${voy.vesselName} (${dHere.toFixed(1)}m laden here) cannot berth at ${locName.get(stop.locationId) ?? stop.locationId}`);
       for (const op of stop.ops) {
         // Compartment capacity
         const cap = capById.get(op.compartmentId);
@@ -31,6 +39,7 @@ export function validate(input: EngineInput, voyages: Voyage[]): { ok: boolean; 
         // Apply to inventory on the arrival day (matches the engine's bookkeeping).
         inv.addOp(stop.locationId, op.productId, stop.arriveDay, op.op === 'LOAD' ? -op.qty : op.qty);
       }
+      aboard += loadHere - dischHere;
     }
   }
 
