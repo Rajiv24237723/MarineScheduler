@@ -55,6 +55,8 @@ export interface EngineInput {
 export interface FlowOverride { locationId: string; productId: string; dailyIn?: number; dailyOut?: number; }
 export interface EmergencyDemand { locationId: string; productId: string; qty: number; day: number; }
 export interface TankOutage { locationId: string; productId: string; fromDay: number; toDay: number; }
+export interface PortClosure { locationId: string; fromDay: number; toDay: number; }   // berth shut for a window
+export interface VesselDelay { vesselId: string; availFromDay: number; }                // vessel free only from this day
 
 export interface EngineOptions {
   seed?: number;
@@ -63,9 +65,15 @@ export interface EngineOptions {
   emergencyDemands?: EmergencyDemand[];   // sudden one-off demand spikes
   tankOutages?: TankOutage[];             // tank unavailable for a day range
   flowOverrides?: FlowOverride[];         // revised daily production/consumption
+  portClosures?: PortClosure[];           // berth/port shut for a window (weather, swell, SPM fault, congestion) — ships wait it out
+  vesselDelays?: VesselDelay[];           // vessel available only from a later day (laycan slip, off-hire repair, Cape re-route)
   asOfDay?: number;                       // "today" — voyages before this are committed/frozen
   mode?: string;                          // recovery posture (minimal-change | cost-optimal)
   frozenVoyages?: Voyage[];               // committed voyages preserved by a rolling-horizon replan
+  // Operational slack (defaults applied in the engine): pad port time, deliver early, turn around.
+  portSlack?: number;                     // multiplier on berth+pump+changeover time (default 1.25)
+  safetyDays?: number;                    // arrive this many days before dry-out (default 2)
+  turnaroundDays?: number;                // buffer between a vessel's voyages (default 1)
 }
 
 // --- Solve outputs ---------------------------------------------------------
@@ -101,15 +109,37 @@ export interface InventoryProjection {
 
 export interface Dual { constraint: string; shadowPrice: number; }
 
+/** Monte-Carlo stress test of the committed plan against sampled port/transit delays. */
+export interface Resilience {
+  iterations: number;
+  resilientPct: number;       // 100 − stockout probability
+  stockoutProbPct: number;    // % of simulated runs where any node breaches its floor
+  expectedShortfallMt: number;
+  p90ShortfallMt: number;
+  meanSlipDays: number;       // mean of the worst voyage slip per run
+  p90SlipDays: number;
+  worstNodes: { locationId: string; productId: string; name: string; failPct: number }[];
+}
+
 export interface Kpis {
   totalCost: number; demurrage: number; utilizationPct: number;
   dryOutDays: number; tankTopDays: number;
   voyageCount: number; charterRecommendationCount: number;
   demandServedPct: number;
+  resilience?: Resilience;
 }
 
 export interface Unserved {
   locationId: string; productId: string; day: number; shortfallMt: number; reason: string;
+}
+
+/** Resource gap when a plan can't fully serve demand — the "what would close it" summary. */
+export interface ShortfallSummary {
+  totalMt: number;
+  nodes: number;
+  earliestFeasibleDay: number | null;   // soonest a lift dispatched day 0 could physically arrive
+  addlVesselVoyages: number;             // approx extra voyages needed to close the gap
+  addlBerthHours: number;                // approx extra berth time those lifts require
 }
 
 export interface SolveResult {
@@ -122,6 +152,7 @@ export interface SolveResult {
   duals: Dual[];
   kpis: Kpis;
   unserved: Unserved[];
+  shortfall?: ShortfallSummary;
   validation: { ok: boolean; breaches: string[] };
   message: string;
 }

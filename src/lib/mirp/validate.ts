@@ -15,9 +15,19 @@ export function validate(input: EngineInput, voyages: Voyage[]): { ok: boolean; 
   const vesselByName = new Map(input.vessels.map(v => [v.name, v]));
   const berthsByLoc = new Map<string, typeof input.berths>();
   for (const b of input.berths) { if (!berthsByLoc.has(b.locationId)) berthsByLoc.set(b.locationId, [] as any); berthsByLoc.get(b.locationId)!.push(b); }
+  const closures = input.options?.portClosures ?? [];
+  const vDelay = new Map((input.options?.vesselDelays ?? []).map(d => [d.vesselId, d.availFromDay]));
 
   for (const voy of voyages) {
     const v = vesselByName.get(voy.vesselName);
+    // Delay disruptions invalidate a committed voyage that rides a not-yet-available hull or
+    // calls a berth during its closure window.
+    const dd = voy.vesselId ? vDelay.get(voy.vesselId) : undefined;
+    if (dd != null && voy.startDay < dd)
+      breaches.push(`Delay: ${voy.vesselName} not ready until day ${dd} (voyage starts day ${voy.startDay})`);
+    for (const s of voy.stops) for (const c of closures)
+      if (s.locationId === c.locationId && s.arriveDay >= c.fromDay && s.arriveDay <= c.toDay)
+        breaches.push(`Closure: ${locName.get(c.locationId) ?? c.locationId} shut days ${c.fromDay}–${c.toDay} when ${voy.vesselName} calls on day ${s.arriveDay}`);
     const capById = new Map((v?.compartments ?? []).map(c => [c.id, c.cap]));
     const totalCap = Math.max(1, (v?.compartments ?? []).reduce((s, c) => s + c.cap, 0));
     // Draft alongside scales with cargo aboard: ballast → laden across the compartment fill.

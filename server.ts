@@ -10,12 +10,13 @@ import { seed } from './src/db/seed';
 import { solve } from './src/lib/mirp/engine';
 import { validate } from './src/lib/mirp/validate';
 import { InventoryModel } from './src/lib/mirp/inventory';
+import { classifyReplan, DEFAULT_THRESHOLDS, ReplanThresholds } from './src/lib/mirp/classify';
 import { EngineInput, EngineOptions, SolveResult } from './src/lib/mirp/types';
 
 const app = express();
 app.use(express.json());
 const PORT = 3000;
-const HORIZON_DAYS = 62;          // 01 Jul – 31 Aug 2026
+const HORIZON_DAYS = 30;          // start-of-month operating plan: 01–31 Jul 2026
 const START_DATE = '2026-07-01';
 
 // ---------------------------------------------------------------------------
@@ -147,6 +148,24 @@ app.post('/api/optimize', async (req, res) => {
   } catch (e) { console.error(e); res.status(500).json({ error: 'optimize failed', message: (e as Error).message }); }
 });
 
+// Streaming optimize: emits the solver's live convergence (NDJSON, one event per line) as
+// the multi-start search runs, then a final result. The client animates the cost trajectory.
+app.post('/api/optimize/stream', async (req, res) => {
+  const stream = (req.query.stream as string) || 'POL';
+  const options: EngineOptions = req.body?.options ?? {};
+  res.setHeader('Content-Type', 'application/x-ndjson');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('X-Accel-Buffering', 'no');
+  const write = (o: any) => { res.write(JSON.stringify(o) + '\n'); (res as any).flush?.(); };
+  try {
+    const input = await loadEngineInput(stream, options);
+    const result = await solve(input, ev => write(ev));
+    const versionId = await persistVersion(stream, result, 'reoptimize', (await activeVersion(stream))?.id ?? null);
+    write({ type: 'result', versionId, achievable: result.achievable, kpis: result.kpis, unserved: result.unserved, shortfall: result.shortfall, message: result.message });
+    res.end();
+  } catch (e) { console.error(e); write({ type: 'error', message: (e as Error).message }); res.end(); }
+});
+
 const diffVs = (result: SolveResult, parentKpi: any) => parentKpi ? {
   costDelta: result.kpis.totalCost - parentKpi.totalCost,
   voyageDelta: result.kpis.voyageCount - parentKpi.voyageCount,
@@ -160,73 +179,104 @@ app.post('/api/scenario/check', async (req, res) => {
   try {
     const stream = (req.query.stream as string) || 'POL';
     const options: EngineOptions = req.body?.options ?? {};
+    const thresholds: ReplanThresholds = { ...DEFAULT_THRESHOLDS, ...(req.body?.thresholds ?? {}) };
     const active = await activeVersion(stream);
     const input = await loadEngineInput(stream, options);
     if (!active?.payload) return res.json({ hasPlan: false, holds: false, breaches: [] });
     const voyages = (active.payload as any).voyages ?? [];
     const v = validate(input, voyages);
-    res.json({ hasPlan: true, activeVersion: active.version, holds: v.ok, breaches: v.breaches });
+    const decision = classifyReplan(input, voyages, v.breaches, thresholds);
+    res.json({ hasPlan: true, activeVersion: active.version, holds: v.ok, breaches: v.breaches, decision });
   } catch (e) { console.error(e); res.status(500).json({ error: 'scenario check failed', message: (e as Error).message }); }
 });
 
-// Simulate a recovery under the scenario as a DRAFT (rolling-horizon, freezing
-// in-progress voyages). The operating plan is left untouched until published.
+// Solve one recovery for a scenario as a DRAFT (rolling-horizon, freezing committed voyages),
+// and classify the replan decision. Shared by /apply (one mode) and /candidates (three modes).
+async function simulateRecovery(stream: string, name: string, rawOptions: EngineOptions, thresholds: ReplanThresholds) {
+  const options: EngineOptions = { ...rawOptions };
+  const parent = await activeVersion(stream);
+  const baseVoy: any[] = (parent?.payload as any)?.voyages ?? [];
+  const asOf = Math.max(0, options.asOfDay ?? 0);
+
+  // A baseline voyage is invalidated by the disruption if it rides an off-hire / delayed vessel
+  // or calls a closed berth / outaged tank during the affected window.
+  const off = new Set(options.excludeVessels ?? []);
+  const vDelay = new Map((options.vesselDelays ?? []).map(d => [d.vesselId, d.availFromDay]));
+  const isInvalidated = (v: any) => {
+    if (v.vesselId && off.has(v.vesselId)) return true;
+    const dd = v.vesselId ? vDelay.get(v.vesselId) : undefined;
+    if (dd != null && v.startDay < dd) return true;
+    for (const o of options.tankOutages ?? []) if (v.stops?.some((s: any) => s.locationId === o.locationId && s.arriveDay >= o.fromDay && s.arriveDay <= o.toDay)) return true;
+    for (const c of options.portClosures ?? []) if (v.stops?.some((s: any) => s.locationId === c.locationId && s.arriveDay >= c.fromDay && s.arriveDay <= c.toDay)) return true;
+    return false;
+  };
+
+  let frozen: any[];
+  if (options.mode === 'minimal-edit') frozen = baseVoy.filter(v => v.startDay < asOf || !isInvalidated(v));
+  else { const freezeUntil = options.mode === 'minimal-change' ? asOf + 14 : asOf; frozen = baseVoy.filter(v => v.startDay < freezeUntil); }
+  options.frozenVoyages = frozen as any;
+  options.asOfDay = asOf;
+
+  // Feasibility + replan-decision for the pre-existing plan under the change (no re-solve).
+  const chkInput = await loadEngineInput(stream, { ...options, frozenVoyages: undefined });
+  let currentPlanHolds = true; let breaches: string[] = [];
+  if (parent?.payload) { const chk = validate(chkInput, baseVoy); currentPlanHolds = chk.ok; breaches = chk.breaches; }
+
+  const result = await solve(await loadEngineInput(stream, options));
+  const versionId = await persistVersion(stream, result, `scenario:${name}`, parent?.id ?? null, 'Draft');
+
+  const frozenIds = new Set(frozen.map(v => v.id));
+  const added = result.voyages.filter(v => !frozenIds.has(v.id));
+  const removedBaseline = baseVoy.filter(v => !frozenIds.has(v.id));
+  const brief = (v: any) => ({
+    vesselName: v.vesselName, vesselClass: v.vesselClass, pool: v.pool,
+    from: v.stops.find((s: any) => s.kind === 'LOAD')?.locationId ?? null,
+    to: v.stops.filter((s: any) => s.kind === 'DISCHARGE').slice(-1)[0]?.locationId ?? null,
+    cost: v.cost,
+  });
+  const changeSet = {
+    asOfDay: asOf, mode: options.mode ?? 'cost-optimal',
+    frozen: frozen.length, added: added.length, removed: removedBaseline.length,
+    replanned: Math.max(0, baseVoy.length - frozen.length),
+    spotAdded: added.filter(v => v.pool === 'SPOT').length,
+    addedVoyages: added.slice(0, 10).map(brief),
+    removedVoyages: removedBaseline.slice(0, 10).map(brief),
+  };
+  const decision = classifyReplan(chkInput, baseVoy, breaches, thresholds, { kpis: result.kpis, unservedNodes: result.unserved.length }, (parent?.kpi as any) ?? null);
+  return { ...result, versionId, currentPlanHolds, breaches, diff: diffVs(result, parent?.kpi ?? null), changeSet, decision };
+}
+
+// Simulate one recovery draft. The operating plan is left untouched until published.
 app.post('/api/scenario/apply', async (req, res) => {
   try {
     const stream = (req.query.stream as string) || 'POL';
     const name = (req.body?.name as string) || 'scenario';
-    const options: EngineOptions = { ...(req.body?.options ?? {}) };
-    const parent = await activeVersion(stream);
-    const baseVoy: any[] = (parent?.payload as any)?.voyages ?? [];
-    const asOf = Math.max(0, options.asOfDay ?? 0);
-
-    // A baseline voyage is invalidated by the disruption if it rides an off-hire
-    // vessel or calls a closed port during the closure window.
-    const off = new Set(options.excludeVessels ?? []);
-    const isInvalidated = (v: any) => {
-      if (v.vesselId && off.has(v.vesselId)) return true;
-      for (const o of options.tankOutages ?? []) if (v.stops?.some((s: any) => s.locationId === o.locationId && s.arriveDay >= o.fromDay && s.arriveDay <= o.toDay)) return true;
-      return false;
-    };
-
-    let frozen: any[];
-    if (options.mode === 'minimal-edit') {
-      // Destroy/repair (Model R): keep every baseline voyage except the ones the
-      // disruption forces out; the greedy then repairs only the residual gaps.
-      frozen = baseVoy.filter(v => v.startDay < asOf || !isInvalidated(v));
-    } else {
-      const freezeUntil = options.mode === 'minimal-change' ? asOf + 14 : asOf;
-      frozen = baseVoy.filter(v => v.startDay < freezeUntil);
-    }
-    options.frozenVoyages = frozen as any;
-    options.asOfDay = asOf;
-
-    // Feasibility of the pre-existing operating plan under the change (no re-solve).
-    let currentPlanHolds = true; let breaches: string[] = [];
-    if (parent?.payload) { const chk = validate(await loadEngineInput(stream, { ...options, frozenVoyages: undefined }), baseVoy); currentPlanHolds = chk.ok; breaches = chk.breaches; }
-
-    const result = await solve(await loadEngineInput(stream, options));
-    const versionId = await persistVersion(stream, result, `scenario:${name}`, parent?.id ?? null, 'Draft');
-
-    const frozenIds = new Set(frozen.map(v => v.id));
-    const added = result.voyages.filter(v => !frozenIds.has(v.id));
-    const removedBaseline = baseVoy.filter(v => !frozenIds.has(v.id)); // baseline voyages dropped
-    const brief = (v: any) => ({
-      vesselName: v.vesselName, vesselClass: v.vesselClass, pool: v.pool,
-      from: v.stops.find((s: any) => s.kind === 'LOAD')?.locationId ?? null,
-      to: v.stops.filter((s: any) => s.kind === 'DISCHARGE').slice(-1)[0]?.locationId ?? null,
-      cost: v.cost,
-    });
-    const changeSet = {
-      asOfDay: asOf, mode: options.mode ?? 'cost-optimal',
-      frozen: frozen.length, added: added.length, removed: removedBaseline.length,
-      replanned: Math.max(0, baseVoy.length - frozen.length),
-      spotAdded: added.filter(v => v.pool === 'SPOT').length,
-      addedVoyages: added.slice(0, 10).map(brief),
-      removedVoyages: removedBaseline.slice(0, 10).map(brief),
-    };
-    res.json({ ...result, versionId, currentPlanHolds, breaches, diff: diffVs(result, parent?.kpi ?? null), changeSet });
+    const thresholds: ReplanThresholds = { ...DEFAULT_THRESHOLDS, ...(req.body?.thresholds ?? {}) };
+    res.json(await simulateRecovery(stream, name, req.body?.options ?? {}, thresholds));
   } catch (e) { console.error(e); res.status(500).json({ error: 'scenario apply failed', message: (e as Error).message }); }
+});
+
+// Three recovery candidates from one event — minimal-change, service-protection, lowest-cost —
+// each a persisted draft, plus a single no-solve replan-decision for the disruption itself.
+app.post('/api/scenario/candidates', async (req, res) => {
+  try {
+    const stream = (req.query.stream as string) || 'POL';
+    const thresholds: ReplanThresholds = { ...DEFAULT_THRESHOLDS, ...(req.body?.thresholds ?? {}) };
+    const base: EngineOptions = req.body?.options ?? {};
+    const active = await activeVersion(stream);
+    const baseVoy: any[] = (active?.payload as any)?.voyages ?? [];
+    const chkInput = await loadEngineInput(stream, base);
+    const chk = active?.payload ? validate(chkInput, baseVoy) : { ok: true, breaches: [] as string[] };
+    const decision = classifyReplan(chkInput, baseVoy, chk.breaches, thresholds);
+
+    const specs = [['minimal-edit', 'Minimal change'], ['minimal-change', 'Service protection'], ['cost-optimal', 'Lowest cost']];
+    const candidates = [];
+    for (const [mode, label] of specs) {
+      const r = await simulateRecovery(stream, label, { ...base, mode }, thresholds);
+      candidates.push({ mode, label, versionId: r.versionId, kpis: r.kpis, unserved: r.unserved, shortfall: r.shortfall, diff: r.diff, changeSet: r.changeSet, decision: r.decision });
+    }
+    res.json({ candidates, holds: chk.ok, breaches: chk.breaches, decision });
+  } catch (e) { console.error(e); res.status(500).json({ error: 'scenario candidates failed', message: (e as Error).message }); }
 });
 
 // Publish a version (draft or superseded) as the operating plan.
@@ -352,7 +402,7 @@ async function startServer() {
     execSync('npx drizzle-kit push --force', { stdio: 'inherit' });
     const locCount = await db.select({ count: sql`count(*)` }).from(schema.locations);
     if ((locCount[0] as any).count === 0) {
-      console.log('Seeding Jul–Aug 2026 monthly plan...');
+      console.log('Seeding July 2026 start-of-month plan...');
       await seed(db);
       console.log('Seed complete.');
     }

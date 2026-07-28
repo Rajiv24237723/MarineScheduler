@@ -45,6 +45,39 @@ export default function DashboardView({ data, onGoto }: { data: DashboardData; o
               <div className={`text-[11px] mt-0.5 ${achievable ? 'text-ok' : hasPlan ? 'text-warn' : 'text-muted-foreground'}`}>
                 {!hasPlan ? 'Run the optimiser to build a plan' : achievable ? 'All demand served within limits' : `${data.unserved.length} node(s) short of demand`}
               </div>
+              {hasPlan && k.resilience && (() => {
+                const r = k.resilience!;
+                const tone = r.resilientPct >= 95 ? 'text-ok' : r.resilientPct >= 85 ? 'text-warn' : 'text-bad';
+                const dot = r.resilientPct >= 95 ? SIG.green : r.resilientPct >= 85 ? SIG.yellow : SIG.red;
+                return (
+                  <Tip side="bottom" content={
+                    <div className="max-w-[15rem] space-y-1.5">
+                      <TipRows title={`Plan resilience · ${r.iterations} sims`} rows={[
+                        ['Nodes holding', `${r.resilientPct}%`],
+                        ['Nodes exposed (avg)', `${r.stockoutProbPct}%`],
+                        ['Exp. shortfall', `${r.expectedShortfallMt.toLocaleString()} MT`],
+                        ['P90 shortfall', `${r.p90ShortfallMt.toLocaleString()} MT`],
+                        ['Voyage slip · mean / P90', `${r.meanSlipDays} / ${r.p90SlipDays} d`],
+                      ]} />
+                      {r.worstNodes.length > 0 && (
+                        <div className="pt-1 border-t border-border/50">
+                          <div className="font-cond text-[9px] uppercase tracking-[0.12em] text-muted-foreground mb-0.5">Most exposed</div>
+                          {r.worstNodes.map(n => (
+                            <div key={`${n.locationId}|${n.productId}`} className="flex justify-between gap-3 text-[11px]"><span className="truncate text-foreground/80">{n.name}</span><span className="tabular-nums text-muted-foreground">{n.failPct}%</span></div>
+                          ))}
+                        </div>
+                      )}
+                      <div className="text-muted-foreground pt-0.5">Monte-Carlo replay against sampled port/transit delays — how the plan holds when legs run late.</div>
+                    </div>
+                  }>
+                    <div className="mt-1.5 inline-flex items-center gap-1.5 cursor-help">
+                      <CodeBlock color={dot} size={9} />
+                      <span className="font-cond text-[10px] uppercase tracking-[0.12em] text-muted-foreground">Resilience</span>
+                      <span className={`text-[11px] font-mono tabular-nums ${tone}`}>{r.resilientPct}%</span>
+                    </div>
+                  </Tip>
+                );
+              })()}
             </div>
           </div>
           <div className="flex-1 grid grid-cols-3 lg:grid-cols-6 gap-px bg-border/40">

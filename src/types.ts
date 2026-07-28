@@ -35,9 +35,20 @@ export interface InventoryProjection {
   smin: number; smax: number; series: DayStock[]; firstDryOutDay: number | null; firstTankTopDay: number | null;
 }
 export interface Dual { constraint: string; shadowPrice: number; }
+export interface Resilience {
+  iterations: number;
+  resilientPct: number;
+  stockoutProbPct: number;
+  expectedShortfallMt: number;
+  p90ShortfallMt: number;
+  meanSlipDays: number;
+  p90SlipDays: number;
+  worstNodes: { locationId: string; productId: string; name: string; failPct: number }[];
+}
 export interface Kpis {
   totalCost: number; demurrage: number; utilizationPct: number; dryOutDays: number; tankTopDays: number;
   voyageCount: number; charterRecommendationCount: number; demandServedPct: number;
+  resilience?: Resilience;
 }
 export interface Unserved { locationId: string; productId: string; day: number; shortfallMt: number; reason: string; }
 export interface VersionSummary { id: string; version: number; status: string; trigger: string; objectiveCost: number; achievable: number; createdAt: string; }
@@ -55,6 +66,20 @@ export interface DashboardData {
   validation: { ok: boolean; breaches: string[] } | null;
   activeVersionId: string | null;
   versions: VersionSummary[];
+}
+
+/** Replan-decision thresholds (Settings-editable), passed to the scenario endpoints. */
+export interface ReplanThresholds {
+  dryOutDaysCover: number; ullageMarginPct: number; demurrageInr: number; costVariancePct: number; qtyChangePct: number;
+}
+export const DEFAULT_THRESHOLDS: ReplanThresholds = {
+  dryOutDaysCover: 3, ullageMarginPct: 8, demurrageInr: 30_000_000, costVariancePct: 7, qtyChangePct: 10,
+};
+export interface ReplanDecision {
+  level: 'L0' | 'L1' | 'L2' | 'L3' | 'L4';
+  label: string; reasons: string[];
+  blast: { voyages: number; nodes: number; fromDay: number | null; toDay: number | null };
+  recommend: string;
 }
 
 /** Cross-view navigation context: land on a tab focused on a specific entity. */

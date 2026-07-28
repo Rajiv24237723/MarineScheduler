@@ -5,11 +5,6 @@ import { haversineNm, sailDays, dailyBunkerMt } from './distance';
 // Cost constants (kept consistent with earlier engine so figures compare).
 const BUNKER_USD_PER_MT = 600, INR = 83, PORT_CALL_USD = 50000, DEM_USD_PER_DAY = 20000;
 const MIN_PARCEL = 2000;
-// Operational slack so the plan is robust, not razor-tight — a delay on one leg should
-// not cascade and invalidate the schedule. Port calls are windows, not exact points.
-const PORT_SLACK = 1.25;   // pad berthing + pumping + changeover time for weather/congestion
-const SAFETY_DAYS = 2;     // arrive this many days before dry-out (a laycan cushion, not JIT)
-const TURNAROUND_DAYS = 1; // buffer before a vessel is ready to start its next voyage
 
 interface VesselState {
   v: Vessel; locId: string; freeDay: number;
@@ -39,6 +34,19 @@ export function runGreedy(input: EngineInput, inv: InventoryModel, rand: () => n
   const spot = input.vessels.filter(v => v.pool === 'SPOT');
   const berthsByLoc = groupBy(input.berths, b => b.locationId);
   const berthUsage = new Map<string, number>(); // `${loc}|${day}` -> count
+
+  // Delay disruptions. A port closure pushes a berthing to the first open day after the window
+  // (the vessel waits at anchorage); vessel delays shift a hull's earliest availability.
+  const closures = input.options?.portClosures ?? [];
+  const closedUntil = (loc: string, arriveDay: number) => {
+    let d = arriveDay;
+    for (let guard = 0; guard < 8; guard++) {
+      const c = closures.find(x => x.locationId === loc && d >= x.fromDay && d <= x.toDay);
+      if (!c) break; d = c.toDay + 1;
+    }
+    return d;
+  };
+  const vesselDelay = new Map((input.options?.vesselDelays ?? []).map(d => [d.vesselId, d.availFromDay]));
 
   // Compartment compatibility lookup.
   const compat = new Map<string, { allowed: boolean; hours: number; cost: number }>();
@@ -70,6 +78,11 @@ export function runGreedy(input: EngineInput, inv: InventoryModel, rand: () => n
   // LNG boils off in transit (~0.12 %/day); load extra to cover the loss to the tank.
   const boilOffRate = (pid: string) => (classOf.get(pid) === 'LNG' ? 0.0012 : 0);
   const SPEED_FLOOR = 0.85; // slow-steaming: min fraction of service speed (gentle, preserves throughput)
+  // Operational slack (options-driven; the plan is a 30-day commitment, so it carries cushion
+  // rather than relying on costly replanning). Port calls are windows, deliveries land early.
+  const portSlack = input.options?.portSlack ?? 1.25;       // pad berth+pump+changeover time
+  const safetyDays = Math.max(0, input.options?.safetyDays ?? 2); // deliver this early (laycan cushion)
+  const turnaroundDays = Math.max(0, input.options?.turnaroundDays ?? 1);
 
   const vstates = new Map<string, VesselState>();
   // Day-0 positions: distribute vessels round-robin over all network ports (loading points
@@ -105,6 +118,8 @@ export function runGreedy(input: EngineInput, inv: InventoryModel, rand: () => n
   }
   // Idle vessels can only act from "today" onward.
   if (asOf > 0) for (const vs of vstates.values()) if (vs.freeDay < asOf) vs.freeDay = asOf;
+  // A delayed vessel is unavailable until its revised readiness day.
+  for (const vs of vstates.values()) { const d = vesselDelay.get(vs.v.id); if (d != null) vs.freeDay = Math.max(vs.freeDay, d); }
 
   // Which (loc,product) are consumers (potential demand nodes)?
   const demandNodes: Need[] = [];
@@ -137,7 +152,7 @@ export function runGreedy(input: EngineInput, inv: InventoryModel, rand: () => n
 
     // A node already below floor at "today" is recovered ASAP (a few days out),
     // not declared impossible against a past deadline.
-    const deadline = urgent.day < asOf ? asOf + 5 : Math.max(asOf + 1, urgent.day - SAFETY_DAYS);
+    const deadline = urgent.day < asOf ? asOf + 5 : Math.max(asOf + 1, urgent.day - safetyDays);
     const built = buildBestVoyage(urgent.need, deadline);
     if (!built) {
       // Even a spot charter can't serve (no compatible source / unreachable): report shortfall.
@@ -226,7 +241,7 @@ export function runGreedy(input: EngineInput, inv: InventoryModel, rand: () => n
       .filter(nd => (classOf.get(nd.productId) ?? 'CLEAN') === service)
       .map(nd => ({ nd, day: inv.firstDryOut(nd.locId, nd.productId) }))
       .filter(x => x.day !== null)
-      .sort((a, b) => a.day! - b.day!)) queue.push({ need: o.nd, deadline: Math.max(asOf + 1, o.day! - SAFETY_DAYS) });
+      .sort((a, b) => a.day! - b.day!)) queue.push({ need: o.nd, deadline: Math.max(asOf + 1, o.day! - safetyDays) });
 
     // Serve one product to its most urgent destinations: pool free compartments (a parcel
     // spans several tanks), picking up from one or more sources, split across destinations.
@@ -325,7 +340,7 @@ export function runGreedy(input: EngineInput, inv: InventoryModel, rand: () => n
       for (const s of stows) vs.compHist[s.compartmentId] = [...(vs.compHist[s.compartmentId] ?? []), s.productId].slice(-4);
       for (const [k, add] of tl.berthAdds) berthUsage.set(k, (berthUsage.get(k) ?? 0) + add);
       vs.locId = tl.endLoc;
-      vs.freeDay = tl.endDay + TURNAROUND_DAYS;
+      vs.freeDay = tl.endDay + turnaroundDays;
     };
 
     return { voyage, apply };
@@ -378,7 +393,7 @@ export function runGreedy(input: EngineInput, inv: InventoryModel, rand: () => n
     const opsAt = (loc: string, kind: 'LOAD' | 'DISCHARGE') => (kind === 'LOAD' ? loadOps.get(loc)! : (dischByDest.get(loc) ?? []));
     const qtyAt = (loc: string, kind: 'LOAD' | 'DISCHARGE') => opsAt(loc, kind).reduce((s, o) => s + o.qty, 0);
     const opDaysAt = (loc: string, kind: 'LOAD' | 'DISCHARGE') =>
-      Math.max(1, Math.ceil((berthingH(loc) + (kind === 'LOAD' ? (loadChangeH.get(loc) ?? 0) : 0) + qtyAt(loc, kind) / rate(loc)) * PORT_SLACK / 24));
+      Math.max(1, Math.ceil((berthingH(loc) + (kind === 'LOAD' ? (loadChangeH.get(loc) ?? 0) : 0) + qtyAt(loc, kind) / rate(loc)) * portSlack / 24));
     const deadlineAt = (dest: string) => Math.min(...deliveries.filter(d => d.destLoc === dest).map(d => d.deadline));
 
     // Pickup→delivery precedence: a destination depends on every source of the grades it receives.
@@ -438,6 +453,10 @@ export function runGreedy(input: EngineInput, inv: InventoryModel, rand: () => n
       const bs = berthsByLoc.get(loc);
       if (bs && bs.length && !bs.some(b => b.maxDraft >= draftAt(alongsideAboard) - 1e-6)) return null;
       hop(loc);
+      // Port closure: if the vessel arrives during a shut window it waits at anchorage until
+      // the berth reopens — idle days that accrue demurrage and push the whole call later.
+      const arr0 = day; day = closedUntil(loc, day);
+      if (day > arr0) breakdown.demurrage += DEM_USD_PER_DAY * INR * (day - arr0);
       if (kind === 'LOAD') for (const o of ops) breakdown.changeover += transition(lastOf(vs.compHist[o.compartmentId]), o.productId).cost;
       const arriveDay = day;
       const byProd = new Map<string, number>();

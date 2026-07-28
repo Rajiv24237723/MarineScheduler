@@ -1,7 +1,7 @@
 ﻿import * as schema from './schema';
 
 /**
- * IOCL-grounded coastal MIRP network, Jul–Aug 2026 (horizon day 0 = 2026-07-01).
+ * IOCL-grounded coastal MIRP network, 30-day start-of-month plan (horizon day 0 = 2026-07-01).
  *
  * Grounded in public facts about Indian Oil (11 refineries ~80.55 MMTPA, ~13,000 km
  * product pipelines, a bunkering network at ~15 ports) and its coastal logistics, then
@@ -30,8 +30,8 @@
  * LNG: Qatar/Australia to the Dahej, Ennore and Kochi regas terminals.
  */
 export async function seed(db: any) {
-  const W = { start: '2026-07-01', end: '2026-08-31' };
-  const DAYS = 62;
+  const W = { start: '2026-07-01', end: '2026-07-31' };
+  const DAYS = 30;
   const C = (id: string, cap: number) => ({ id, cap });
   // n compartments summing to ~0.95·DWT; product tankers use port/starboard pairs.
   const gen = (total: number, n: number, pair: boolean, fill = 0.95) => {
@@ -66,6 +66,7 @@ export async function seed(db: any) {
     { id: 'p6', stream: 'CRUDE', name: 'Basrah Heavy', type: 'CRUDE', color: '#059669', cargoClass: 'CRUDE', ...S(890, 40, -10, '3.5%', '27 API', 65000, 280000) },
     { id: 'p7', stream: 'CRUDE', name: 'Murban', type: 'CRUDE', color: '#34d399', cargoClass: 'CRUDE', ...S(820, 40, -12, '0.8%', '40 API', 65000, 280000) },
     { id: 'p16', stream: 'CRUDE', name: 'Urals', type: 'CRUDE', color: '#047857', cargoClass: 'CRUDE', ...S(870, 40, -10, '1.5%', '31 API', 65000, 280000) },
+    { id: 'p20', stream: 'CRUDE', name: 'Kuwait Export', type: 'CRUDE', color: '#065f46', cargoClass: 'CRUDE', ...S(885, 40, -12, '2.6%', '31 API', 65000, 280000) },
     // LNG
     { id: 'p8', stream: 'LNG', name: 'LNG', type: 'LNG', color: '#ec4899', cargoClass: 'LNG', ...S(450, null, null, '—', 'LNG', 40000, 90000) },
   ];
@@ -129,52 +130,87 @@ export async function seed(db: any) {
     }
   }
 
-  // ---- CRUDE (import grades → refinery crude farms) -------------------------
+  // ---- CRUDE (seaborne imports → coastal refinery intake gateways) ----------
+  // Crude is imported directly at coastal SPM/SBM/port gateways; inland refineries are
+  // fed onward by pipeline (Salaya–Mathura → Koyali/Mathura; Mundra–Panipat; Paradip–
+  // Haldia–Barauni), modeled here as crude consumption at the gateway. The source slate
+  // reflects FY24-25 reality — Russia (Urals) + the Persian Gulf dominate (~77% of imports);
+  // US Gulf / W.Africa spot volumes are minor and largely delivered-basis, so are not
+  // modeled as IOCL-scheduled tonnage. Intake rates ≈ refinery throughput (MMTPA·1e6/365).
   const crudeSrc: any[] = [
-    ['l_ras_tanura', 'Ras Tanura (Saudi Aramco)', 26.65, 50.15, 'p5'],
-    ['l_basrah', 'Basrah Oil Terminal (Iraq)', 29.68, 48.80, 'p6'],
-    ['l_fujairah', 'Fujairah (Murban, UAE)', 25.12, 56.33, 'p7'],
-    ['l_novorossiysk', 'Novorossiysk (Urals, Russia)', 44.72, 37.79, 'p16'],
+    ['l_ras_tanura', 'Ras Tanura (Saudi Aramco)', 26.65, 50.15, 'p5'],       // Arab Light — Gulf
+    ['l_basrah', 'Basrah Oil Terminal (Iraq)', 29.68, 48.80, 'p6'],          // Basrah Heavy — Gulf
+    ['l_kuwait', 'Mina al-Ahmadi (Kuwait)', 29.07, 48.13, 'p20'],            // Kuwait Export — Gulf
+    ['l_das_crude', 'Das Island (ADNOC, UAE)', 25.14, 52.87, 'p7'],          // Murban — Gulf
+    ['l_novorossiysk', 'Novorossiysk (Urals, Russia)', 44.72, 37.79, 'p16'], // Urals — Black Sea
   ];
-  // Real disclosed farm shells are larger (Vadinar ~1.5 MMT, Paradip ~1.1 MMT, Mundra ~0.6 MMT);
-  // the scheduler models operational fill (~40-day buffer, modest headroom) so a single lift
-  // can't front-load the whole shell and starve other farms.
-  const crudeFarm: any[] = [
-    ['l_vadinar_crude', 'Vadinar Crude Farm', 22.28, 69.73, 'p5', 12000],
-    ['l_paradip_crude', 'Paradip Crude Farm', 20.28, 86.62, 'p6', 12000],
-    ['l_chennai_crude', 'Chennai (Manali) Crude Farm', 13.10, 80.30, 'p7', 9000],
-    ['l_mumbai_crude', 'Mumbai Crude Farm', 18.90, 72.80, 'p16', 8000],
+  // Gateway → refineries fed (onward by pipeline), grade, intake t/day, opening stock (t), and
+  // tank-farm capacity (t) set to IOCL's published figures: Vadinar 1.5 MMT (18 tanks), Mundra
+  // 0.6 MMT (12), Paradip 1.1 MMT (20), Haldia LBT 0.4 MMT (8). Vadinar is the dominant west
+  // gateway — the 2,663 km Salaya–Mathura line (25 MMTPA) feeds Koyali + Mathura + most of
+  // Panipat; Mundra is the small MPPL secondary (8.4 MMTPA); Paradip's three SPMs feed the east
+  // via the 1,465 km PHBPL. Haldia is draft-limited (~14 m) → Aframax; Chennai (CPCL) → Suezmax.
+  // Grades map to IOCL's real top suppliers (Saudi/Iraq/Kuwait/UAE Gulf + Russia, ~Russia 36% of
+  // the FY24 national basket). The slow Russia (Urals) lane is placed on low-drain Mundra so one
+  // in-horizon cargo covers it; the Gulf lanes (5–10 d) carry the rest. Tanks start ~90% full,
+  // as real refineries build crude inventory before the operating month. Volumes are scaled for a
+  // solvable from-empty 30-day demo but preserve the real gateway proportions (Vadinar >> Mundra).
+  const crudeIntake: any[] = [
+    // id, name, lat, lng, grade, t/day, opening(t), tankCap(t), berth draft
+    ['l_vadinar', 'Vadinar SPM (→ Koyali/Mathura/Panipat)', 22.28, 69.73, 'p5', 60000, 1350000, 1500000, 32],
+    ['l_mundra', 'Mundra SBM (→ Panipat)', 22.74, 69.70, 'p16', 15000, 550000, 600000, 32],
+    ['l_paradip_crude', 'Paradip SPM (→ Paradip refinery)', 20.26, 86.67, 'p6', 45000, 1050000, 1100000, 32],
+    ['l_haldia_crude', 'Haldia Oil Jetties (→ Haldia)', 22.03, 88.09, 'p20', 14000, 420000, 500000, 14],
+    ['l_chennai_crude', 'Chennai Port (→ CPCL Manali)', 13.10, 80.30, 'p7', 28000, 560000, 620000, 17],
   ];
   for (const [id, name, lat, lng, grade] of crudeSrc) {
     locations.push({ id, stream: 'CRUDE', name, type: 'SOURCE', lat, lng });
-    tanks.push({ id: `t_${++tk}`, stream: 'CRUDE', locationId: id, productId: grade, capacity: 3000000, minStock: 0, currentStock: 700000, name: `${tag(id)}-CR` });
-    nodeFlows.push({ id: `nf_${++nf}`, stream: 'CRUDE', locationId: id, productId: grade, dailyIn: 15000, dailyOut: 0 });
-    berths.push({ id: `b_${++bb}`, stream: 'CRUDE', locationId: id, name: `${tag(id)}-SBM`, nsim: 2, rateMtPerHr: 8000, berthingHours: 18, maxDraft: 22 });
+    tanks.push({ id: `t_${++tk}`, stream: 'CRUDE', locationId: id, productId: grade, capacity: 6000000, minStock: 0, currentStock: 2500000, name: `${tag(id)}-CR` });
+    nodeFlows.push({ id: `nf_${++nf}`, stream: 'CRUDE', locationId: id, productId: grade, dailyIn: 90000, dailyOut: 0 });
+    berths.push({ id: `b_${++bb}`, stream: 'CRUDE', locationId: id, name: `${tag(id)}-SPM`, nsim: 2, rateMtPerHr: 9000, berthingHours: 24, maxDraft: 32 });
   }
-  for (const [id, name, lat, lng, grade, dout] of crudeFarm) {
+  for (const [id, name, lat, lng, grade, dout, open, cap, draft] of crudeIntake) {
     const q = dout as number;
-    locations.push({ id, stream: 'CRUDE', name, type: 'CRUDE_STORAGE', lat, lng });
-    tanks.push({ id: `t_${++tk}`, stream: 'CRUDE', locationId: id, productId: grade, capacity: q * 55, minStock: q * 5, currentStock: q * 40, name: `${tag(id)}-CR` });
-    nodeFlows.push({ id: `nf_${++nf}`, stream: 'CRUDE', locationId: id, productId: grade, dailyIn: 0, dailyOut: dout });
-    planLines.push({ id: `pl_${++pl}`, stream: 'CRUDE', kind: 'DEMAND', productId: grade, locationId: id, qty: (dout as number) * DAYS, windowStart: W.start, windowEnd: W.end, priority: 1 });
-    berths.push({ id: `b_${++bb}`, stream: 'CRUDE', locationId: id, name: `${tag(id)}-SPM`, nsim: 1, rateMtPerHr: 8000, berthingHours: 18, maxDraft: 23 });
+    locations.push({ id, stream: 'CRUDE', name, type: 'CRUDE_INTAKE', lat, lng });
+    tanks.push({ id: `t_${++tk}`, stream: 'CRUDE', locationId: id, productId: grade, capacity: cap as number, minStock: q * 4, currentStock: open as number, name: `${tag(id)}-CR` });
+    nodeFlows.push({ id: `nf_${++nf}`, stream: 'CRUDE', locationId: id, productId: grade, dailyIn: 0, dailyOut: q });
+    planLines.push({ id: `pl_${++pl}`, stream: 'CRUDE', kind: 'DEMAND', productId: grade, locationId: id, qty: q * DAYS, windowStart: W.start, windowEnd: W.end, priority: 1 });
+    berths.push({ id: `b_${++bb}`, stream: 'CRUDE', locationId: id, name: `${tag(id)}-BERTH`, nsim: 1, rateMtPerHr: 9000, berthingHours: 24, maxDraft: draft as number });
   }
 
-  // ---- LNG (Qatar / Australia → regas terminals) ---------------------------
-  const lngSrc: any[] = [['l_qatar', 'Ras Laffan (Qatar)', 25.91, 51.55], ['l_australia', 'Gorgon (Australia)', -20.80, 115.45]];
-  const lngTerm: any[] = [['l_dahej', 'Dahej LNG Terminal', 21.71, 72.59, 8000, 13.0], ['l_ennore_lng', 'Ennore LNG Terminal', 13.26, 80.33, 6000, 12.5], ['l_kochi_lng', 'Kochi (Puthuvype) LNG Terminal', 9.98, 76.24, 4000, 13.0]];
+  // ---- LNG (foreign liquefaction ports → IOCL regas terminals) --------------
+  // LNG is not refined: it lands at coastal regas terminals, is stored cryogenically, vaporized
+  // and sent out by pipeline to power / city-gas / fertilizer demand. IOCL's ~13.18 MMTPA regas
+  // portfolio: its OWNED Ennore (Kamarajar) terminal (5 MMTPA, 2×180,000 m³ tanks, berth 362 m
+  // LOA / 12.5 m draft), plus booked capacity at Dahej (3.75), Dhamra (3.0), Jafrabad (1.0) and
+  // Kochi (0.43). Dahej + Dhamra carry the west/east baseload; Ennore is growing (~24% utilised);
+  // Kochi is pipeline-constrained and light. Sources: Ras Laffan (Qatar, ~3-day workhorse), Das
+  // Island (ADNOC/UAE) and Qalhat (Oman) short-haul, US Gulf the long-haul swing (Trafigura deal).
+  const lngSrc: any[] = [
+    ['l_ras_laffan', 'Ras Laffan (Qatar)', 25.91, 51.55],
+    ['l_das_lng', 'Das Island (ADNOC, UAE)', 25.14, 52.87],
+    ['l_qalhat', 'Qalhat (Oman LNG)', 22.60, 59.45],
+    ['l_sabine', 'Sabine Pass (US Gulf)', 29.73, -93.87],
+  ];
+  // id, name, lat, lng, send-out t/day, berth draft, storage cap (t), opening (t), floor (t)
+  const lngTerm: any[] = [
+    ['l_dahej', 'Dahej LNG Terminal (IOCL 3.75 MMTPA booked)', 21.68, 72.53, 7700, 13.0, 190000, 150000, 25000],
+    ['l_dhamra', 'Dhamra LNG Terminal (IOCL 3 MMTPA booked)', 20.79, 87.05, 4800, 14.0, 165000, 130000, 20000],
+    ['l_ennore_lng', 'Ennore (Kamarajar) LNG Terminal (owned)', 13.24, 80.34, 4700, 12.5, 162000, 120000, 20000],
+    ['l_kochi_lng', 'Kochi (Puthuvype) LNG Terminal', 9.98, 76.24, 1000, 13.0, 155000, 100000, 18000],
+  ];
   for (const [id, name, lat, lng] of lngSrc) {
     locations.push({ id, stream: 'LNG', name, type: 'SOURCE', lat, lng });
-    tanks.push({ id: `t_${++tk}`, stream: 'LNG', locationId: id, productId: 'p8', capacity: 2500000, minStock: 0, currentStock: 600000, name: `${tag(id)}-LNG` });
-    nodeFlows.push({ id: `nf_${++nf}`, stream: 'LNG', locationId: id, productId: 'p8', dailyIn: 11000, dailyOut: 0 });
-    berths.push({ id: `b_${++bb}`, stream: 'LNG', locationId: id, name: `${tag(id)}-J1`, nsim: 2, rateMtPerHr: 6000, berthingHours: 18, maxDraft: 14 });
+    tanks.push({ id: `t_${++tk}`, stream: 'LNG', locationId: id, productId: 'p8', capacity: 3000000, minStock: 0, currentStock: 1800000, name: `${tag(id)}-LNG` });
+    nodeFlows.push({ id: `nf_${++nf}`, stream: 'LNG', locationId: id, productId: 'p8', dailyIn: 20000, dailyOut: 0 });
+    berths.push({ id: `b_${++bb}`, stream: 'LNG', locationId: id, name: `${tag(id)}-JETTY`, nsim: 2, rateMtPerHr: 6000, berthingHours: 18, maxDraft: 14 });
   }
-  for (const [id, name, lat, lng, dout, draft] of lngTerm) {
+  for (const [id, name, lat, lng, dout, draft, cap, open, mn] of lngTerm) {
     locations.push({ id, stream: 'LNG', name, type: 'LNG_TERMINAL', lat, lng });
-    tanks.push({ id: `t_${++tk}`, stream: 'LNG', locationId: id, productId: 'p8', capacity: 220000, minStock: 20000, currentStock: 120000, name: `${tag(id)}-LNG` });
-    nodeFlows.push({ id: `nf_${++nf}`, stream: 'LNG', locationId: id, productId: 'p8', dailyIn: 0, dailyOut: dout });
+    tanks.push({ id: `t_${++tk}`, stream: 'LNG', locationId: id, productId: 'p8', capacity: cap as number, minStock: mn as number, currentStock: open as number, name: `${tag(id)}-LNG` });
+    nodeFlows.push({ id: `nf_${++nf}`, stream: 'LNG', locationId: id, productId: 'p8', dailyIn: 0, dailyOut: dout as number });
     planLines.push({ id: `pl_${++pl}`, stream: 'LNG', kind: 'DEMAND', productId: 'p8', locationId: id, qty: (dout as number) * DAYS, windowStart: W.start, windowEnd: W.end, priority: 1 });
-    berths.push({ id: `b_${++bb}`, stream: 'LNG', locationId: id, name: `${tag(id)}-J1`, nsim: 1, rateMtPerHr: 6000, berthingHours: 18, maxDraft: draft });
+    berths.push({ id: `b_${++bb}`, stream: 'LNG', locationId: id, name: `${tag(id)}-JETTY`, nsim: 1, rateMtPerHr: 6000, berthingHours: 18, maxDraft: draft as number });
   }
 
   // ---- Fleets — SCI-style names, realistic class DWT / draft / segregations --
@@ -206,18 +242,25 @@ export async function seed(db: any) {
     // POL Bitumen — dedicated heated carrier (never mixed with anything); spot pool for peaks
     V('v_pol_bit', 'POL', 'MT Asphalt Pioneer', 'Bitumen Carrier', 12000, 'OWNED', 11.5, 9000, 0, 7.5, 4.5, [C('1', 3000), C('2', 3000), C('3', 3000), C('4', 3000)], 'BITUMEN'),
     V('v_pol_bit_s', 'POL', 'Spot Bitumen Trader', 'Bitumen Carrier', 11000, 'SPOT', 11.5, 0, 22, 7.3, 4.4, [C('1', 3000), C('2', 3000), C('3', 3000)], 'BITUMEN'),
-    // CRUDE — Desh series (Aframax / Suezmax / VLCC)
-    V('v_cru1', 'CRUDE', 'MT Desh Ujaala', 'VLCC', 311000, 'TC', 14.5, 35000, 0, 20.5, 10.0, gen(311000, 15, false)),
-    V('v_cru2', 'CRUDE', 'MT Desh Shakti', 'Suezmax', 158000, 'OWNED', 14.0, 28000, 0, 16.0, 9.0, gen(158000, 12, false)),
-    V('v_cru3', 'CRUDE', 'MT Desh Vaibhav', 'Aframax', 110000, 'COA', 13.5, 21500, 0, 14.2, 8.0, gen(110000, 12, false)),
-    V('v_cru4', 'CRUDE', 'MT Desh Gaurav', 'Suezmax', 157000, 'OWNED', 14.0, 27000, 0, 16.0, 9.0, gen(157000, 12, false)),
-    V('v_cru_s1', 'CRUDE', 'Spot VLCC Ceres', 'VLCC', 311000, 'SPOT', 14.5, 0, 8, 20.5, 10.0, gen(311000, 15, false)),
+    // CRUDE — Desh series: SCI-operated Suezmaxes (owned) + time-charter VLCCs for the Gulf
+    // program + COA hulls for Urals/east-coast liftings + a spot pool. Aframaxes (laden < 14 m)
+    // are the only class that can berth draft-limited Haldia; VLCCs only call deep-water SPMs.
+    V('v_cru1', 'CRUDE', 'MT Desh Shakti', 'Suezmax', 158000, 'OWNED', 14.0, 28000, 0, 16.0, 9.0, gen(158000, 12, false)),
+    V('v_cru2', 'CRUDE', 'MT Desh Gaurav', 'Suezmax', 157000, 'OWNED', 14.0, 27000, 0, 15.9, 9.0, gen(157000, 12, false)),
+    V('v_cru3', 'CRUDE', 'MT Desh Ujaala', 'VLCC', 311000, 'TC', 15.0, 35000, 0, 20.5, 10.0, gen(311000, 15, false)),
+    V('v_cru4', 'CRUDE', 'MT Desh Bhakti', 'VLCC', 300000, 'TC', 15.0, 34000, 0, 20.2, 10.0, gen(300000, 15, false)),
+    V('v_cru5', 'CRUDE', 'MT Desh Rakshak', 'VLCC', 316000, 'TC', 15.0, 35500, 0, 20.6, 10.0, gen(316000, 15, false)),
+    V('v_cru6', 'CRUDE', 'MT Desh Vaibhav', 'Aframax', 110000, 'COA', 13.5, 21500, 0, 13.8, 8.0, gen(110000, 12, false)),
+    V('v_cru7', 'CRUDE', 'MT Desh Prem', 'Suezmax', 150000, 'COA', 14.0, 26000, 0, 15.8, 9.0, gen(150000, 12, false)),
+    // CRUDE spot pool (the recommendation pool)
+    V('v_cru_s1', 'CRUDE', 'Spot VLCC Ceres', 'VLCC', 311000, 'SPOT', 15.0, 0, 8, 20.5, 10.0, gen(311000, 15, false)),
     V('v_cru_s2', 'CRUDE', 'Spot Suezmax Nord', 'Suezmax', 158000, 'SPOT', 14.0, 0, 9, 16.2, 9.0, gen(158000, 12, false)),
-    // LNG — Disha / Raahi / Aseem + spot
-    V('v_lng1', 'LNG', 'LNG Disha', 'LNGC', 93000, 'TC', 18.0, 65000, 0, 11.9, 9.0, gen(93000, 4, false, 1.0)),
-    V('v_lng2', 'LNG', 'LNG Raahi', 'LNGC', 90000, 'OWNED', 17.5, 62000, 0, 11.8, 9.0, gen(90000, 4, false, 1.0)),
-    V('v_lng3', 'LNG', 'LNG Aseem', 'LNGC', 92000, 'COA', 18.0, 63000, 0, 11.9, 9.0, gen(92000, 4, false, 1.0)),
-    V('v_lng_s1', 'LNG', 'Spot LNGC Aegean', 'LNGC', 90000, 'SPOT', 18.0, 0, 30, 11.9, 9.0, gen(90000, 4, false, 1.0)),
+    V('v_cru_s3', 'CRUDE', 'Spot Aframax Baltic', 'Aframax', 105000, 'SPOT', 13.5, 0, 11, 13.6, 8.0, gen(105000, 12, false)),
+    // LNG — Disha (Q-Flex) / Raahi / Aseem (conventional) + spot; short Qatar/UAE hauls
+    V('v_lng1', 'LNG', 'LNG Disha', 'LNGC', 93000, 'TC', 18.5, 65000, 0, 12.0, 9.0, gen(93000, 4, false, 1.0)),
+    V('v_lng2', 'LNG', 'LNG Raahi', 'LNGC', 75000, 'OWNED', 18.5, 58000, 0, 11.7, 9.0, gen(75000, 4, false, 1.0)),
+    V('v_lng3', 'LNG', 'LNG Aseem', 'LNGC', 74000, 'COA', 18.5, 57000, 0, 11.7, 9.0, gen(74000, 4, false, 1.0)),
+    V('v_lng_s1', 'LNG', 'Spot LNGC Aegean', 'LNGC', 90000, 'SPOT', 18.5, 0, 30, 11.9, 9.0, gen(90000, 4, false, 1.0)),
   ];
 
   // ---- Compartment compatibility (from → to). Unlisted pairs default allowed, 0 cost.

@@ -1,10 +1,11 @@
 ﻿import { useState } from 'react';
-import { DashboardData } from '../types';
+import { DashboardData, ReplanThresholds, DEFAULT_THRESHOLDS } from '../types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Sliders, Database, RotateCcw, Info } from 'lucide-react';
+import { Sliders, Database, RotateCcw, Info, Gauge } from 'lucide-react';
 
-export default function SettingsView({ data, stream, attempts, setAttempts, onReseed }: {
-  data: DashboardData; stream: string; attempts: number; setAttempts: (n: number) => void; onReseed: () => Promise<void>;
+export default function SettingsView({ data, stream, attempts, setAttempts, thresholds, setThresholds, onReseed }: {
+  data: DashboardData; stream: string; attempts: number; setAttempts: (n: number) => void;
+  thresholds: ReplanThresholds; setThresholds: (t: ReplanThresholds) => void; onReseed: () => Promise<void>;
 }) {
   const [reseeding, setReseeding] = useState(false);
   const [confirm, setConfirm] = useState(false);
@@ -12,6 +13,14 @@ export default function SettingsView({ data, stream, attempts, setAttempts, onRe
   const active = data.versions?.find(v => v.status === 'Active');
 
   const stat = (l: string, v: string | number) => <div className="bg-background/50 p-3 rounded-md border border-border/70"><div className="text-[11px] text-muted-foreground">{l}</div><div className="text-lg font-semibold text-foreground mt-0.5">{v}</div></div>;
+
+  const setT = (k: keyof ReplanThresholds, v: number) => setThresholds({ ...thresholds, [k]: v });
+  const thRow = (k: keyof ReplanThresholds, label: string, help: string, step = 1, suffix = '') => (
+    <div className="flex items-center justify-between gap-3">
+      <div><div className="text-xs text-foreground/90">{label}</div><div className="text-[10px] text-muted-foreground leading-tight">{help}</div></div>
+      <div className="flex items-center gap-1 shrink-0"><input type="number" step={step} value={thresholds[k]} onChange={e => setT(k, Number(e.target.value))} className="w-24 bg-background/50 rounded-md px-2 py-1 border border-border/80 text-right text-xs" />{suffix && <span className="text-[10px] text-muted-foreground w-6">{suffix}</span>}</div>
+    </div>
+  );
 
   return (
     <div className="space-y-5 max-w-3xl">
@@ -26,6 +35,18 @@ export default function SettingsView({ data, stream, attempts, setAttempts, onRe
             <div className="flex justify-between text-[10px] text-muted-foreground/70 mt-0.5"><span>faster</span><span>higher-quality plans</span></div>
           </div>
           <p className="text-[11px] text-muted-foreground flex items-start gap-1.5"><Info className="w-3.5 h-3.5 mt-0.5 shrink-0" /> Each attempt is a fresh greedy construction with perturbed routing; the best feasible, lowest-cost plan is kept. The search stops early once all demand is served. Applies to the next <span className="text-cyan-400">Run Optimizer</span>.</p>
+        </CardContent>
+      </Card>
+
+      <Card className="bg-card/50 border-border/80 rounded-md">
+        <CardHeader className="py-2.5 px-4 border-b border-border/60 flex flex-row items-center justify-between"><CardTitle className="text-xs font-semibold text-foreground/80 flex items-center gap-2"><Gauge className="w-3.5 h-3.5 text-cyan-400" /> Replan-decision thresholds</CardTitle><button onClick={() => setThresholds(DEFAULT_THRESHOLDS)} className="text-[10px] text-muted-foreground hover:text-foreground/80">Reset defaults</button></CardHeader>
+        <CardContent className="p-4 space-y-3">
+          {thRow('dryOutDaysCover', 'Dry-out cover floor', 'Flag service risk when a node’s cover falls below this many days', 1, 'd')}
+          {thRow('ullageMarginPct', 'Ullage margin', 'Required headroom over an incoming parcel before discharge', 1, '%')}
+          {thRow('costVariancePct', 'Cost-variance trigger', 'Recovery cost above baseline by more than this flags a cheaper candidate', 1, '%')}
+          {thRow('qtyChangePct', 'Quantity-change trigger', 'A movement quantity change beyond this forces feasibility revalidation', 1, '%')}
+          {thRow('demurrageInr', 'Demurrage tolerance', 'Demurrage exposure (₹) that itself justifies a replan', 1000000, '₹')}
+          <p className="text-[11px] text-muted-foreground flex items-start gap-1.5"><Info className="w-3.5 h-3.5 mt-0.5 shrink-0" /> These drive the replan-decision level (L0 actualize → L4 full replan) and trigger reasons in the <span className="text-cyan-400">Alerts &amp; Actions</span> workbench. Demo defaults — calibrate per product / terminal.</p>
         </CardContent>
       </Card>
 

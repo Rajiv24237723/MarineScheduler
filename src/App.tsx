@@ -5,7 +5,7 @@
 
 import { useState, useEffect, useCallback, ReactNode } from 'react';
 import { Ship, LayoutDashboard, CalendarDays, Factory, Map as MapIcon, Settings, AlertTriangle, Database, TrendingUp, Bell } from 'lucide-react';
-import { DashboardData, Focus } from './types';
+import { DashboardData, Focus, ReplanThresholds, DEFAULT_THRESHOLDS } from './types';
 import { Toaster, TopProgress, toast } from './components/ui/toast';
 import { StreamFlag, Pennant } from './components/ui/SignalFlag';
 import { TipProvider, Tip } from './components/ui/tooltip';
@@ -17,6 +17,7 @@ import ReplanningView from './components/ReplanningView';
 import MasterDataView from './components/MasterDataView';
 import InventoryView from './components/InventoryView';
 import SettingsView from './components/SettingsView';
+import { GenerationConsole } from './components/GenerationConsole';
 import { cn } from './lib/utils';
 
 export default function App() {
@@ -26,6 +27,7 @@ export default function App() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [optimizing, setOptimizing] = useState(false);
   const [attempts, setAttempts] = useState(12);
+  const [thresholds, setThresholds] = useState<ReplanThresholds>(DEFAULT_THRESHOLDS);
 
   const load = useCallback(async () => {
     const r = await fetch(`/api/dashboard?stream=${stream}`);
@@ -34,17 +36,14 @@ export default function App() {
 
   useEffect(() => { setData(null); load().catch(console.error); }, [load]);
 
-  const runOptimize = useCallback(async () => {
-    setOptimizing(true);
-    try {
-      const r = await fetch(`/api/optimize?stream=${stream}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ options: { alnsIterations: attempts } }) });
-      const res = await r.json();
-      await load();
-      if (res?.achievable) toast(`${stream} plan optimised — ${res.kpis?.demandServedPct ?? 0}% served, ${res.kpis?.voyageCount ?? 0} voyages${res.kpis?.charterRecommendationCount ? `, ${res.kpis.charterRecommendationCount} charter rec(s)` : ''}.`, 'success');
-      else toast(`${stream} plan has a shortfall — ${res?.unserved?.length ?? 0} node(s) unserved (${res?.kpis?.demandServedPct ?? 0}% served).`, 'info');
-    } catch (e) { console.error(e); toast('Optimisation failed — check the server logs.', 'error'); }
+  // Opens the live generation console, which streams the solve and refreshes on completion.
+  const runOptimize = useCallback(() => setOptimizing(true), []);
+  const onGenerated = useCallback(async (res: any) => {
     setOptimizing(false);
-  }, [stream, load, attempts]);
+    await load();
+    if (res?.achievable) toast(`${stream} plan optimised — ${res.kpis?.demandServedPct ?? 0}% served, ${res.kpis?.voyageCount ?? 0} voyages${res.kpis?.charterRecommendationCount ? `, ${res.kpis.charterRecommendationCount} charter rec(s)` : ''}.`, 'success');
+    else toast(`${stream} plan has a shortfall — ${res?.unserved?.length ?? 0} node(s) unserved (${res?.kpis?.demandServedPct ?? 0}% served).`, 'info');
+  }, [stream, load]);
 
   const reseed = useCallback(async () => {
     try { await fetch('/api/admin/reseed', { method: 'POST' }); await load(); toast('Demo data reset to the seeded network.', 'success'); }
@@ -203,7 +202,7 @@ export default function App() {
             <div className="flex items-stretch">
               {readout('Served', `${data.kpis?.demandServedPct ?? 0}%`, (data.kpis?.demandServedPct ?? 0) >= 100 ? 'text-ok' : 'text-warn', `${data.kpis?.demandServedPct ?? 0}% of ${stream} horizon demand met${(data.unserved?.length ?? 0) ? ` · ${data.unserved.length} node(s) short` : ' · all nodes within limits'}`)}
               {readout('Voyages', String(data.kpis?.voyageCount ?? 0), 'text-foreground', `${data.kpis?.voyageCount ?? 0} voyage(s) in the active ${stream} plan${data.kpis?.charterRecommendationCount ? ` · ${data.kpis.charterRecommendationCount} charter rec(s)` : ''}`)}
-              {readout('Horizon', 'Jul–Aug', 'text-foreground', 'Planning window: 1 Jul – 31 Aug 2026 (62 days)')}
+              {readout('Horizon', 'July', 'text-foreground', 'Start-of-month operating plan: 1–31 Jul 2026 (30 days)')}
               {alertCount > 0 && (
                 <div className="flex items-center gap-2 pl-4 border-l border-border/50">
                   <Pennant tone={(data.unserved?.length || data.kpis?.dryOutDays) ? 'critical' : 'warn'} size={16} />
@@ -243,14 +242,15 @@ export default function App() {
             {activeTab === 'inventory' && <InventoryView data={data} goto={goto} focus={focus} />}
             {activeTab === 'tanks' && <TankFarmView data={data} goto={goto} focus={focus} />}
             {activeTab === 'tracking' && <TrackingView data={data} goto={goto} />}
-            {activeTab === 'replan' && <ReplanningView data={data} stream={stream} refresh={load} />}
+            {activeTab === 'replan' && <ReplanningView data={data} stream={stream} refresh={load} thresholds={thresholds} />}
             {activeTab === 'master' && <MasterDataView stream={stream} data={data} refresh={load} focus={focus} />}
-            {activeTab === 'settings' && <SettingsView data={data} stream={stream} attempts={attempts} setAttempts={setAttempts} onReseed={reseed} />}
+            {activeTab === 'settings' && <SettingsView data={data} stream={stream} attempts={attempts} setAttempts={setAttempts} thresholds={thresholds} setThresholds={setThresholds} onReseed={reseed} />}
           </div>
         </main>
       </div>
 
       <TopProgress active={optimizing} />
+      {optimizing && <GenerationConsole stream={stream} attempts={attempts} onDone={onGenerated} onClose={() => setOptimizing(false)} />}
       <Toaster />
     </div>
     </TipProvider>
