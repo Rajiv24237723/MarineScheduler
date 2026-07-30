@@ -16,7 +16,6 @@ export function GenerationConsole({ stream, attempts, onDone, onClose }: {
   const bump = () => force(x => x + 1);
   const S = useRef<St>({ recv: [], streamDone: false, result: null, phase: 'construct', error: null });
   const start = useRef(0);
-  const fired = useRef(false);
 
   useEffect(() => {
     start.current = performance.now();
@@ -55,10 +54,6 @@ export function GenerationConsole({ stream, attempts, onDone, onClose }: {
   const s = S.current, recv = s.recv, n = recv.length;
   const head = Math.min((performance.now() - start.current) * SPEED, n);
   const finished = s.streamDone && !!s.result && head >= n;
-
-  useEffect(() => {
-    if (finished && !fired.current) { fired.current = true; const id = setTimeout(() => onDone(s.result), 1500); return () => clearTimeout(id); }
-  });
 
   // chart geometry — x is elapsed time, y is running-best cost
   const W = 660, H = 250, PL = 54, PR = 20, PT = 20, PB = 36;
@@ -147,7 +142,7 @@ export function GenerationConsole({ stream, attempts, onDone, onClose }: {
         <div className="flex items-center justify-between px-5 py-3 border-t border-border/60 bg-card/70">
           <span className="text-[11px] text-muted-foreground">
             {finished
-              ? (s.result.achievable ? 'Feasible — all demand served within limits. Opening the plan…' : `Shortfall — ${s.result.unserved?.length ?? 0} node(s) unserved.`)
+              ? (s.result.achievable ? 'Feasible — all demand served within limits. Open the plan to review.' : `Shortfall — ${s.result.unserved?.length ?? 0} node(s) unserved. Open the plan to review.`)
               : 'Kept: the cheapest feasible construction of the multi-start search.'}
           </span>
           {finished
