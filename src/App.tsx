@@ -4,7 +4,7 @@
  */
 
 import { useState, useEffect, useCallback, ReactNode } from 'react';
-import { Ship, LayoutDashboard, CalendarDays, Factory, Map as MapIcon, Settings, AlertTriangle, Database, TrendingUp, Bell } from 'lucide-react';
+import { Ship, LayoutDashboard, CalendarDays, Factory, Map as MapIcon, Settings, AlertTriangle, Database, TrendingUp, Bell, Upload } from 'lucide-react';
 import { DashboardData, Focus, ReplanThresholds, DEFAULT_THRESHOLDS } from './types';
 import { Toaster, TopProgress, toast } from './components/ui/toast';
 import { StreamFlag, Pennant } from './components/ui/SignalFlag';
@@ -17,6 +17,7 @@ import ReplanningView from './components/ReplanningView';
 import MasterDataView from './components/MasterDataView';
 import InventoryView from './components/InventoryView';
 import SettingsView from './components/SettingsView';
+import DemandUploadView from './components/DemandUploadView';
 import { GenerationConsole } from './components/GenerationConsole';
 import { cn } from './lib/utils';
 
@@ -85,6 +86,7 @@ export default function App() {
     {
       label: 'Planning',
       items: [
+        { id: 'demand', label: 'Movement Plan', icon: Upload },
         { id: 'scheduler', label: 'Operational Plan', icon: CalendarDays },
       ]
     },
@@ -238,6 +240,7 @@ export default function App() {
         <main className="flex-1 overflow-auto p-8 relative z-10 flex flex-col">
           <div key={activeTab} className="animate-fade-in-up flex-1 flex flex-col min-h-0">
             {activeTab === 'dashboard' && <DashboardView data={data} onGoto={goto} />}
+            {activeTab === 'demand' && <DemandUploadView data={data} stream={stream} refresh={load} />}
             {activeTab === 'scheduler' && <SchedulerView data={data} stream={stream} onOptimize={runOptimize} optimizing={optimizing} goto={goto} />}
             {activeTab === 'inventory' && <InventoryView data={data} goto={goto} focus={focus} />}
             {activeTab === 'tanks' && <TankFarmView data={data} goto={goto} focus={focus} />}
