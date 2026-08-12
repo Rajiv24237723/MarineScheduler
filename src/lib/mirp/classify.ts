@@ -51,6 +51,7 @@ export function classifyReplan(
   // Blast radius — which committed voyages the disruption disturbs.
   const off = new Set(o.excludeVessels ?? []);
   const vDelay = new Map((o.vesselDelays ?? []).map(d => [d.vesselId, d.availFromDay]));
+  const vOut = o.vesselOutages ?? [];
   const closures = o.portClosures ?? [];
   const outages = o.tankOutages ?? [];
   const flowNodes = new Set([...(o.flowOverrides ?? []), ...(o.emergencyDemands ?? [])].map(f => `${f.locationId}|${f.productId}`));
@@ -64,6 +65,7 @@ export function classifyReplan(
     let hit = false;
     if (v.vesselId && off.has(v.vesselId)) hit = true;
     const dd = v.vesselId ? vDelay.get(v.vesselId) : undefined; if (dd != null && v.startDay < dd) hit = true;
+    if (v.vesselId) for (const ou of vOut) if (ou.vesselId === v.vesselId && v.startDay <= ou.toDay && v.endDay >= ou.fromDay) hit = true;
     for (const s of v.stops) {
       for (const c of closures) if (s.locationId === c.locationId && s.arriveDay >= c.fromDay && s.arriveDay <= c.toDay) hit = true;
       for (const t of outages) if (s.locationId === t.locationId && s.arriveDay >= t.fromDay && s.arriveDay <= t.toDay) hit = true;
@@ -96,9 +98,11 @@ export function classifyReplan(
   if (thin) reasons.push(`thin cover (< ${thresholds.dryOutDaysCover} d) at ${thin} node(s)`);
 
   // Disruption context.
-  if (off.size) reasons.push(`${off.size} vessel(s) off-hire/diverted`);
-  if ((o.vesselDelays ?? []).length) reasons.push('vessel delayed');
-  if (closures.length) reasons.push('berth closure in window');
+  if (off.size) reasons.push(`${off.size} vessel(s) unavailable all month`);
+  if (vOut.length) reasons.push(`${vOut.length} vessel off-hire window(s)`);
+  if ((o.vesselDelays ?? []).length) reasons.push(`${(o.vesselDelays ?? []).length} vessel delay(s)`);
+  if (closures.length) reasons.push(`${closures.length} port/berth closure(s)`);
+  if (outages.length) reasons.push(`${outages.length} tank outage(s)`);
 
   // Cost / demurrage — only meaningful once a recovery has been solved.
   const prolongedClosure = closures.some(c => c.toDay - c.fromDay >= 7);

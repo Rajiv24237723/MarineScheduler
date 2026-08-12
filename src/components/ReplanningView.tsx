@@ -1,9 +1,10 @@
-﻿import { useEffect, useState } from 'react';
-import { DashboardData, Voyage, ReplanThresholds, horizonStartDate } from '../types';
+﻿import { useCallback, useEffect, useState } from 'react';
+import { DashboardData, Voyage, ReplanThresholds, ScenarioEvent, SavedScenario, horizonStartDate } from '../types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Modal } from '@/components/ui/modal';
 import { toast } from './ui/toast';
 import { VoyageDetail } from './VoyageDetail';
+import ScenarioComposer from './ScenarioComposer';
 import { GitCompare, AlertTriangle, CheckCircle2, Ship, Anchor, Snowflake, Plus, Layers, Flag } from 'lucide-react';
 import { format, addDays } from 'date-fns';
 
@@ -24,22 +25,16 @@ export default function ReplanningView({ data, stream, refresh, thresholds }: { 
   const active = versions.find(v => v.status === 'Active');
   const loc = (id: string | null) => id ? (data.locations.find(l => l.id === id)?.name ?? id) : 'source';
   const periodLabel = (id: string | null | undefined) => (data.periods ?? []).find(p => p.id === id)?.label ?? '—';
-  const prod = (id: string) => data.products.find(p => p.id === id)?.name ?? id;
-  const demandNodes = data.nodeFlows.filter(f => f.dailyOut > 0);
 
-  // Planning posture. Day bounds and the default event window follow the period's
-  // horizon rather than a fixed 30-day month.
+  // Planning posture. Day bounds follow the period's horizon, not a fixed month length.
   const horizon = data.period?.horizonDays ?? 30;
-  const day = (frac: number) => String(Math.round(horizon * frac));
   const [asOf, setAsOf] = useState(Math.round(horizon * 0.4));
   const [mode, setMode] = useState('minimal-edit');
 
-  // Disruption events
-  const [flowNode, setFlowNode] = useState(''); const [flowVal, setFlowVal] = useState('');
-  const [spotNode, setSpotNode] = useState(''); const [spotQty, setSpotQty] = useState('60000'); const [spotDay, setSpotDay] = useState(day(0.67));
-  const [closureLoc, setClosureLoc] = useState(''); const [closeFrom, setCloseFrom] = useState(day(0.47)); const [closeTo, setCloseTo] = useState(day(0.8));
-  const [delayVessel, setDelayVessel] = useState(''); const [delayDay, setDelayDay] = useState(day(0.4));
-  const [vesselOut, setVesselOut] = useState<Set<string>>(new Set());
+  // Disruption events — an ordered list, any number of any type.
+  const [events, setEvents] = useState<ScenarioEvent[]>([]);
+  const [scenarios, setScenarios] = useState<SavedScenario[]>([]);
+  const [warnings, setWarnings] = useState<string[]>([]);
 
   const [busy, setBusy] = useState(false);
   const [check, setCheck] = useState<any>(null);
@@ -59,28 +54,36 @@ export default function ReplanningView({ data, stream, refresh, thresholds }: { 
   const [versionVoyages, setVersionVoyages] = useState<{ v: number; voyages: Voyage[] } | null>(null);
   const [voyageModal, setVoyageModal] = useState<Voyage | null>(null);
 
-  const toggleVessel = (id: string) => setVesselOut(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
-  const events: string[] = [];
-  if (flowNode && flowVal) events.push(`Demand revised @ ${loc(flowNode.split('|')[0])} → ${flowVal}/d`);
-  if (spotNode && spotQty) events.push(`Spot cargo +${Number(spotQty).toLocaleString()} MT @ ${loc(spotNode.split('|')[0])} day ${spotDay}`);
-  if (closureLoc) events.push(`Berth closure @ ${loc(closureLoc)} days ${closeFrom}–${closeTo}`);
-  if (delayVessel) events.push(`${data.vessels.find(v => v.id === delayVessel)?.name ?? 'Vessel'} delayed → day ${delayDay}`);
-  if (vesselOut.size) events.push(`${vesselOut.size} vessel(s) off-hire/diverted`);
+  // Saved scenarios for this stream.
+  const loadScenarios = useCallback(async () => {
+    try { const r = await fetch(`/api/scenarios?stream=${stream}`); setScenarios(await r.json()); } catch (e) { console.error(e); }
+  }, [stream]);
+  useEffect(() => { loadScenarios(); }, [loadScenarios]);
+  useEffect(() => { setEvents([]); setWarnings([]); setDraft(null); setCandidates(null); setCheck(null); }, [stream]);
 
-  const buildOptions = () => {
-    const o: any = { asOfDay: asOf, mode };
-    if (flowNode && flowVal) { const [l, p] = flowNode.split('|'); o.flowOverrides = [{ locationId: l, productId: p, dailyOut: Number(flowVal) }]; }
-    if (spotNode && spotQty) { const [l, p] = spotNode.split('|'); o.emergencyDemands = [{ locationId: l, productId: p, qty: Number(spotQty), day: Number(spotDay) }]; }
-    if (closureLoc) o.portClosures = [{ locationId: closureLoc, fromDay: Number(closeFrom), toDay: Number(closeTo) }];
-    if (delayVessel) o.vesselDelays = [{ vesselId: delayVessel, availFromDay: Number(delayDay) }];
-    if (vesselOut.size) o.excludeVessels = [...vesselOut];
-    return o;
+  const saveScenario = async (name: string) => {
+    await fetch(`/api/scenarios?stream=${stream}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, events, asOfDay: asOf, mode }),
+    });
+    await loadScenarios();
+    toast(`Scenario “${name}” saved.`, 'success');
   };
+  const loadScenario = (s: SavedScenario) => {
+    setEvents(s.events ?? []); setAsOf(s.asOfDay ?? 0); setMode(s.mode ?? 'minimal-edit');
+    setDraft(null); setCandidates(null); setCheck(null); setWarnings([]);
+    toast(`Loaded “${s.name}” — ${(s.events ?? []).length} event(s).`, 'info');
+  };
+  const deleteScenario = async (id: string) => { await fetch(`/api/scenarios/${id}`, { method: 'DELETE' }); await loadScenarios(); };
+
+  // The server compiles events → engine options, so posture is all the client sends.
+  const body = (extra: any = {}) => JSON.stringify({ events, options: { asOfDay: asOf, mode }, thresholds, ...extra });
   const hasEvents = events.length > 0;
 
-  const doCheck = async () => { setBusy(true); setDraft(null); setCandidates(null); try { const r = await fetch(`/api/scenario/check?stream=${stream}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ options: buildOptions(), thresholds }) }); setCheck(await r.json()); } catch (e) { console.error(e); } setBusy(false); };
-  const doSimulate = async () => { setBusy(true); setCandidates(null); try { const r = await fetch(`/api/scenario/apply?stream=${stream}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: mode, options: buildOptions(), thresholds }) }); const res = await r.json(); setDraft(res); setCheck({ hasPlan: true, holds: res.currentPlanHolds, breaches: res.breaches, decision: res.decision, activeVersion: active?.version }); await refresh(); toast(`Recovery draft created — ${res.changeSet?.removed ?? 0} removed / ${res.changeSet?.added ?? 0} added.`, 'success'); } catch (e) { console.error(e); toast('Simulation failed.', 'error'); } setBusy(false); };
-  const doCandidates = async () => { setBusy(true); setDraft(null); try { const r = await fetch(`/api/scenario/candidates?stream=${stream}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ options: buildOptions(), thresholds }) }); const res = await r.json(); setCandidates(res); setCheck({ hasPlan: true, holds: res.holds, breaches: res.breaches, decision: res.decision, activeVersion: active?.version }); await refresh(); toast(`Generated ${res.candidates?.length ?? 0} recovery candidates.`, 'success'); } catch (e) { console.error(e); toast('Candidate generation failed.', 'error'); } setBusy(false); };
+  const POST = (path: string, extra: any = {}) => fetch(`/api/scenario/${path}?stream=${stream}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: body(extra) }).then(r => r.json());
+  const doCheck = async () => { setBusy(true); setDraft(null); setCandidates(null); try { const res = await POST('check'); setCheck(res); setWarnings(res.warnings ?? []); } catch (e) { console.error(e); } setBusy(false); };
+  const doSimulate = async () => { setBusy(true); setCandidates(null); try { const res = await POST('apply', { name: mode }); setDraft(res); setWarnings(res.warnings ?? []); setCheck({ hasPlan: true, holds: res.currentPlanHolds, breaches: res.breaches, decision: res.decision, activeVersion: active?.version }); await refresh(); toast(`Recovery draft created — ${res.changeSet?.removed ?? 0} removed / ${res.changeSet?.added ?? 0} added.`, 'success'); } catch (e) { console.error(e); toast('Simulation failed.', 'error'); } setBusy(false); };
+  const doCandidates = async () => { setBusy(true); setDraft(null); try { const res = await POST('candidates'); setCandidates(res); setWarnings(res.warnings ?? []); setCheck({ hasPlan: true, holds: res.holds, breaches: res.breaches, decision: res.decision, activeVersion: active?.version }); await refresh(); toast(`Generated ${res.candidates?.length ?? 0} recovery candidates.`, 'success'); } catch (e) { console.error(e); toast('Candidate generation failed.', 'error'); } setBusy(false); };
   const publish = async (id: string) => { await fetch(`/api/versions/${id}/publish`, { method: 'POST' }); setDraft(null); setCheck(null); await refresh(); toast('Draft published as the operating plan.', 'success'); };
   const rollback = async (id: string) => { await fetch(`/api/versions/${id}/rollback`, { method: 'POST' }); await refresh(); toast('Rolled back — this version is now active.', 'success'); };
   const discard = async (id: string) => { await fetch(`/api/versions/${id}`, { method: 'DELETE' }); if (draft?.versionId === id) setDraft(null); await refresh(); toast('Draft discarded.', 'info'); };
@@ -88,8 +91,6 @@ export default function ReplanningView({ data, stream, refresh, thresholds }: { 
   const discardCandidates = async () => { for (const c of candidates.candidates) await fetch(`/api/versions/${c.versionId}`, { method: 'DELETE' }); setCandidates(null); await refresh(); toast('Candidates discarded.', 'info'); };
   const compare = async () => { if (!a || !b) return; const r = await fetch(`/api/versions/compare?a=${a}&b=${b}`); setCmp(await r.json()); };
   const openVersion = async (id: string, v: number) => { const r = await fetch(`/api/versions/${id}`); const row = await r.json(); setVersionVoyages({ v, voyages: row.payload?.voyages ?? [] }); };
-
-  const nodeOpt = (f: any) => <option key={`${f.locationId}|${f.productId}`} value={`${f.locationId}|${f.productId}`}>{loc(f.locationId)} · {prod(f.productId)} ({f.dailyOut}/d)</option>;
 
   return (
     <div className="space-y-5">
@@ -142,39 +143,29 @@ export default function ReplanningView({ data, stream, refresh, thresholds }: { 
         );
       })()}
 
-      <div className="grid grid-cols-2 gap-3">
-        {/* Event composer */}
-        <Card className="bg-card/50 border-border/80 rounded-md">
-          <CardHeader className="py-2.5 px-4 border-b border-border/60"><CardTitle className="text-xs font-semibold text-foreground/80 flex items-center gap-2"><AlertTriangle className="w-3.5 h-3.5 text-warn" /> Disruption events</CardTitle></CardHeader>
-          <CardContent className="p-3 space-y-3 text-xs">
-            <div>
-              <label className="text-[11px] text-muted-foreground">Demand revision (new daily offtake)</label>
-              <div className="flex gap-2 mt-1"><select value={flowNode} onChange={e => setFlowNode(e.target.value)} className="flex-1 bg-background/50 rounded-md px-2 py-1.5 border border-border/80"><option value="">— none —</option>{demandNodes.map(nodeOpt)}</select><input placeholder="MT/day" value={flowVal} onChange={e => setFlowVal(e.target.value)} type="number" className="w-24 bg-background/50 rounded-md px-2 py-1.5 border border-border/80" /></div>
-            </div>
-            <div>
-              <label className="text-[11px] text-muted-foreground">Spot / emergency cargo</label>
-              <div className="flex gap-2 mt-1"><select value={spotNode} onChange={e => setSpotNode(e.target.value)} className="flex-1 bg-background/50 rounded-md px-2 py-1.5 border border-border/80"><option value="">— none —</option>{demandNodes.map(nodeOpt)}</select><input value={spotQty} onChange={e => setSpotQty(e.target.value)} type="number" className="w-20 bg-background/50 rounded-md px-2 py-1.5 border border-border/80" title="qty MT" /><input value={spotDay} onChange={e => setSpotDay(e.target.value)} type="number" className="w-14 bg-background/50 rounded-md px-2 py-1.5 border border-border/80" title="by day" /></div>
-            </div>
-            <div>
-              <label className="text-[11px] text-muted-foreground">Berth closure — weather / swell / congestion (ships wait it out)</label>
-              <div className="flex gap-2 mt-1"><select value={closureLoc} onChange={e => setClosureLoc(e.target.value)} className="flex-1 bg-background/50 rounded-md px-2 py-1.5 border border-border/80"><option value="">— none —</option>{data.locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}</select><input value={closeFrom} onChange={e => setCloseFrom(e.target.value)} type="number" className="w-14 bg-background/50 rounded-md px-2 py-1.5 border border-border/80" title="from day" /><input value={closeTo} onChange={e => setCloseTo(e.target.value)} type="number" className="w-14 bg-background/50 rounded-md px-2 py-1.5 border border-border/80" title="to day" /></div>
-            </div>
-            <div>
-              <label className="text-[11px] text-muted-foreground">Vessel delay — laycan slip / repair / Cape re-route (ready by day)</label>
-              <div className="flex gap-2 mt-1"><select value={delayVessel} onChange={e => setDelayVessel(e.target.value)} className="flex-1 bg-background/50 rounded-md px-2 py-1.5 border border-border/80"><option value="">— none —</option>{data.vessels.filter(v => v.pool !== 'SPOT').map(v => <option key={v.id} value={v.id}>{v.name} · {v.class}</option>)}</select><input value={delayDay} onChange={e => setDelayDay(e.target.value)} type="number" className="w-16 bg-background/50 rounded-md px-2 py-1.5 border border-border/80" title="ready by day" /></div>
-            </div>
-            <div>
-              <label className="text-[11px] text-muted-foreground">Vessel off-hire / diverted</label>
-              <div className="flex flex-wrap gap-1 mt-1 max-h-40 overflow-auto">{data.vessels.filter(v => v.pool !== 'SPOT').map(v => (<button key={v.id} onClick={() => toggleVessel(v.id)} className={`px-2 py-1 rounded-md border text-[10px] ${vesselOut.has(v.id) ? 'bg-bad/15 text-bad border-bad/30' : 'bg-background/50 border-border/70 text-muted-foreground hover:text-foreground/80'}`}>{v.name}</button>))}</div>
-            </div>
-            {events.length > 0 && <div className="flex flex-wrap gap-1 pt-1">{events.map((e, i) => <span key={i} className="px-2 py-0.5 rounded-full bg-warn/10 text-warn border border-warn/20 text-[10px]">{e}</span>)}</div>}
-            <div className="flex flex-wrap gap-2 pt-1">
-              <button disabled={busy || !hasEvents} onClick={doCheck} className="px-3 py-1.5 bg-muted hover:bg-accent border border-border/80 rounded-md disabled:opacity-50">Check impact</button>
-              <button disabled={busy || !hasEvents} onClick={doSimulate} className="px-3 py-1.5 bg-primary hover:bg-primary/90 text-primary-foreground rounded-md disabled:opacity-50">{busy ? 'Solving…' : 'Simulate recovery (draft)'}</button>
-              <button disabled={busy || !hasEvents} onClick={doCandidates} className="px-3 py-1.5 bg-muted hover:bg-accent border border-border/80 rounded-md disabled:opacity-50 flex items-center gap-1"><Layers className="w-3.5 h-3.5 text-cyan-400" /> 3 candidates</button>
-            </div>
-          </CardContent>
-        </Card>
+      {/* How the compiler read the events — inverted ranges, colliding delays, floored rates. */}
+      {warnings.length > 0 && (
+        <div className="rounded-md border border-warn/25 bg-warn/5 px-4 py-2.5">
+          <div className="text-[11px] font-medium text-warn mb-1">How the scenario was read</div>
+          <ul className="space-y-0.5">
+            {warnings.map((w, i) => <li key={i} className="text-[11px] text-foreground/75">· {w}</li>)}
+          </ul>
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
+        <div className="space-y-3">
+          <ScenarioComposer
+            data={data} events={events} setEvents={setEvents} horizon={horizon}
+            scenarios={scenarios} onSave={saveScenario} onLoad={loadScenario} onDelete={deleteScenario}
+          />
+          <div className="flex flex-wrap gap-2 text-xs">
+            <button disabled={busy || !hasEvents} onClick={doCheck} className="px-3 py-1.5 bg-muted hover:bg-accent border border-border/80 rounded-md disabled:opacity-50">Check impact</button>
+            <button disabled={busy || !hasEvents} onClick={doSimulate} className="px-3 py-1.5 bg-primary hover:bg-primary/90 text-primary-foreground rounded-md disabled:opacity-50">{busy ? 'Solving…' : 'Simulate recovery (draft)'}</button>
+            <button disabled={busy || !hasEvents} onClick={doCandidates} className="px-3 py-1.5 bg-muted hover:bg-accent border border-border/80 rounded-md disabled:opacity-50 flex items-center gap-1"><Layers className="w-3.5 h-3.5 text-cyan-400" /> 3 candidates</button>
+            {!hasEvents && <span className="self-center text-[11px] text-muted-foreground">Add at least one event to simulate.</span>}
+          </div>
+        </div>
 
         {/* Draft recovery result */}
         <Card className={`bg-card/50 rounded-md ${draft ? 'border-cyan-500/30' : 'border-border/80'}`}>

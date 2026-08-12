@@ -11,7 +11,8 @@ import { solve } from './src/lib/mirp/engine';
 import { validate } from './src/lib/mirp/validate';
 import { InventoryModel } from './src/lib/mirp/inventory';
 import { classifyReplan, DEFAULT_THRESHOLDS, ReplanThresholds } from './src/lib/mirp/classify';
-import { EngineInput, EngineOptions, SolveResult } from './src/lib/mirp/types';
+import { compileEvents } from './src/lib/mirp/scenario';
+import { EngineInput, EngineOptions, ScenarioEvent, SolveResult } from './src/lib/mirp/types';
 
 const app = express();
 app.use(express.json());
@@ -234,6 +235,33 @@ app.post('/api/optimize/stream', async (req, res) => {
   } catch (e) { console.error(e); write({ type: 'error', message: (e as Error).message }); res.end(); }
 });
 
+// ---------------------------------------------------------------------------
+// Scenario events → EngineOptions. The composer posts `events` (an authored list,
+// any number of any type); older callers may still post a raw `options` object.
+// Both paths end up here so check / apply / candidates always agree.
+// ---------------------------------------------------------------------------
+async function resolveOptions(stream: string, body: any): Promise<{ options: EngineOptions; events: ScenarioEvent[]; warnings: string[]; summary: string[] }> {
+  const raw: EngineOptions = body?.options ?? {};
+  const events: ScenarioEvent[] = Array.isArray(body?.events) ? body.events : [];
+  if (!events.length) return { options: raw, events: [], warnings: [], summary: [] };
+
+  const period = await currentPeriod(stream);
+  const [nodeFlows, vessels] = await Promise.all([
+    db.select().from(schema.nodeFlows).where(eq(schema.nodeFlows.stream, stream)),
+    db.select().from(schema.vessels).where(eq(schema.vessels.stream, stream)),
+  ]);
+  const active = await activeVersion(stream);
+  const compiled = compileEvents(events, {
+    horizonDays: period?.horizonDays ?? HORIZON_DAYS,
+    nodeFlows: nodeFlows as any,
+    vessels: vessels as any,
+    baseVoyages: ((active?.payload as any)?.voyages ?? []) as any,
+    asOfDay: Number(raw.asOfDay ?? 0),
+  });
+  // Posture (as-of day, recovery mode) and solver knobs stay on `options`.
+  return { options: { ...raw, ...compiled.options }, events, warnings: compiled.warnings, summary: compiled.summary };
+}
+
 const diffVs = (result: SolveResult, parentKpi: any) => parentKpi ? {
   costDelta: result.kpis.totalCost - parentKpi.totalCost,
   voyageDelta: result.kpis.voyageCount - parentKpi.voyageCount,
@@ -246,16 +274,25 @@ const diffVs = (result: SolveResult, parentKpi: any) => parentKpi ? {
 app.post('/api/scenario/check', async (req, res) => {
   try {
     const stream = (req.query.stream as string) || 'POL';
-    const options: EngineOptions = req.body?.options ?? {};
+    const { options, warnings, summary } = await resolveOptions(stream, req.body);
     const thresholds: ReplanThresholds = { ...DEFAULT_THRESHOLDS, ...(req.body?.thresholds ?? {}) };
     const active = await activeVersion(stream);
     const input = await loadEngineInput(stream, options);
-    if (!active?.payload) return res.json({ hasPlan: false, holds: false, breaches: [] });
+    if (!active?.payload) return res.json({ hasPlan: false, holds: false, breaches: [], warnings, summary });
     const voyages = (active.payload as any).voyages ?? [];
     const v = validate(input, voyages);
     const decision = classifyReplan(input, voyages, v.breaches, thresholds);
-    res.json({ hasPlan: true, activeVersion: active.version, holds: v.ok, breaches: v.breaches, decision });
+    res.json({ hasPlan: true, activeVersion: active.version, holds: v.ok, breaches: v.breaches, decision, warnings, summary });
   } catch (e) { console.error(e); res.status(500).json({ error: 'scenario check failed', message: (e as Error).message }); }
+});
+
+/** Compile a scenario without solving — lets the composer preview and warn as you type. */
+app.post('/api/scenario/compile', async (req, res) => {
+  try {
+    const stream = (req.query.stream as string) || 'POL';
+    const { options, warnings, summary } = await resolveOptions(stream, req.body);
+    res.json({ options, warnings, summary });
+  } catch (e) { console.error(e); res.status(500).json({ error: 'compile failed', message: (e as Error).message }); }
 });
 
 // Solve one recovery for a scenario as a DRAFT (rolling-horizon, freezing committed voyages),
@@ -274,8 +311,16 @@ async function simulateRecovery(stream: string, name: string, rawOptions: Engine
     if (v.vesselId && off.has(v.vesselId)) return true;
     const dd = v.vesselId ? vDelay.get(v.vesselId) : undefined;
     if (dd != null && v.startDay < dd) return true;
+    // An off-hire window the voyage would sail through.
+    if (v.vesselId) for (const o of options.vesselOutages ?? [])
+      if (o.vesselId === v.vesselId && v.startDay <= o.toDay && v.endDay >= o.fromDay) return true;
     for (const o of options.tankOutages ?? []) if (v.stops?.some((s: any) => s.locationId === o.locationId && s.arriveDay >= o.fromDay && s.arriveDay <= o.toDay)) return true;
-    for (const c of options.portClosures ?? []) if (v.stops?.some((s: any) => s.locationId === c.locationId && s.arriveDay >= c.fromDay && s.arriveDay <= c.toDay)) return true;
+    // Only a full shutdown invalidates a committed call. Degraded throughput or one
+    // berth of several down makes the call slower and dearer, not impossible.
+    for (const c of options.portClosures ?? []) {
+      if (c.capacityPct != null || c.berthId) continue;
+      if (v.stops?.some((s: any) => s.locationId === c.locationId && s.arriveDay >= c.fromDay && s.arriveDay <= c.toDay)) return true;
+    }
     return false;
   };
 
@@ -320,7 +365,9 @@ app.post('/api/scenario/apply', async (req, res) => {
     const stream = (req.query.stream as string) || 'POL';
     const name = (req.body?.name as string) || 'scenario';
     const thresholds: ReplanThresholds = { ...DEFAULT_THRESHOLDS, ...(req.body?.thresholds ?? {}) };
-    res.json(await simulateRecovery(stream, name, req.body?.options ?? {}, thresholds));
+    const { options, warnings, summary } = await resolveOptions(stream, req.body);
+    const out = await simulateRecovery(stream, name, options, thresholds);
+    res.json({ ...out, warnings, summary });
   } catch (e) { console.error(e); res.status(500).json({ error: 'scenario apply failed', message: (e as Error).message }); }
 });
 
@@ -330,7 +377,7 @@ app.post('/api/scenario/candidates', async (req, res) => {
   try {
     const stream = (req.query.stream as string) || 'POL';
     const thresholds: ReplanThresholds = { ...DEFAULT_THRESHOLDS, ...(req.body?.thresholds ?? {}) };
-    const base: EngineOptions = req.body?.options ?? {};
+    const { options: base, warnings, summary } = await resolveOptions(stream, req.body);
     const active = await activeVersion(stream);
     const baseVoy: any[] = (active?.payload as any)?.voyages ?? [];
     const chkInput = await loadEngineInput(stream, base);
@@ -343,7 +390,7 @@ app.post('/api/scenario/candidates', async (req, res) => {
       const r = await simulateRecovery(stream, label, { ...base, mode }, thresholds);
       candidates.push({ mode, label, versionId: r.versionId, kpis: r.kpis, unserved: r.unserved, shortfall: r.shortfall, diff: r.diff, changeSet: r.changeSet, decision: r.decision });
     }
-    res.json({ candidates, holds: chk.ok, breaches: chk.breaches, decision });
+    res.json({ candidates, holds: chk.ok, breaches: chk.breaches, decision, warnings, summary });
   } catch (e) { console.error(e); res.status(500).json({ error: 'scenario candidates failed', message: (e as Error).message }); }
 });
 
@@ -436,6 +483,49 @@ app.get('/api/versions/:id', async (req, res) => {
   const rows = await db.select().from(schema.scheduleVersions).where(eq(schema.scheduleVersions.id, req.params.id));
   if (!rows[0]) return res.status(404).json({ error: 'not found' });
   res.json(rows[0]);
+});
+
+// ---------------------------------------------------------------------------
+// Saved scenarios — a named event list, reopenable and re-runnable
+// ---------------------------------------------------------------------------
+
+app.get('/api/scenarios', async (req, res) => {
+  const stream = (req.query.stream as string) || 'POL';
+  const rows = await db.select().from(schema.scenarios).where(eq(schema.scenarios.stream, stream));
+  res.json(rows.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)));
+});
+
+app.post('/api/scenarios', async (req, res) => {
+  try {
+    const stream = (req.query.stream as string) || req.body?.stream || 'POL';
+    const name = (req.body?.name as string)?.trim();
+    if (!name) return res.status(400).json({ error: 'name is required' });
+    const now = new Date().toISOString();
+    const row = {
+      id: req.body?.id ?? randomUUID(), stream, name,
+      description: req.body?.description ?? null,
+      events: (req.body?.events ?? []) as any,
+      asOfDay: Number(req.body?.asOfDay ?? 0),
+      mode: req.body?.mode ?? 'minimal-edit',
+      createdAt: now, updatedAt: now,
+    };
+    await db.insert(schema.scenarios).values(row);
+    res.json(row);
+  } catch (e) { console.error(e); res.status(500).json({ error: 'save scenario failed', message: (e as Error).message }); }
+});
+
+app.put('/api/scenarios/:id', async (req, res) => {
+  try {
+    const patch: any = { ...req.body, updatedAt: new Date().toISOString() };
+    delete patch.id; delete patch.createdAt; delete patch.stream;
+    await db.update(schema.scenarios).set(patch).where(eq(schema.scenarios.id, req.params.id));
+    res.json({ ok: true });
+  } catch (e) { console.error(e); res.status(500).json({ error: 'update scenario failed', message: (e as Error).message }); }
+});
+
+app.delete('/api/scenarios/:id', async (req, res) => {
+  await db.delete(schema.scenarios).where(eq(schema.scenarios.id, req.params.id));
+  res.json({ ok: true });
 });
 
 // ---------------------------------------------------------------------------
@@ -854,7 +944,7 @@ app.post('/api/master/:table/bulk', async (req, res) => {
 // Reset all data back to the seeded demo network.
 app.post('/api/admin/reseed', async (_req, res) => {
   try {
-    const tables = [schema.charterRecommendations, schema.voyageOps, schema.voyageStops, schema.voyages, schema.actuals, schema.scheduleVersions, schema.planPeriods, schema.planLines, schema.nodeFlows, schema.berths, schema.productCompatibility, schema.tanks, schema.vessels, schema.locations, schema.products];
+    const tables = [schema.charterRecommendations, schema.voyageOps, schema.voyageStops, schema.voyages, schema.actuals, schema.scheduleVersions, schema.scenarios, schema.planPeriods, schema.planLines, schema.nodeFlows, schema.berths, schema.productCompatibility, schema.tanks, schema.vessels, schema.locations, schema.products];
     for (const t of tables) await db.delete(t);
     await seed(db);
     res.json({ ok: true });

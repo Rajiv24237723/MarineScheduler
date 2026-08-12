@@ -18,6 +18,13 @@ committed before the as-of day. Each period has one **baseline** version — the
 month's cost is measured against. The first plan published into a period becomes its baseline
 automatically; it can be reassigned from Cost & Variance.
 
+## Berths
+
+One row per **berth**, not per port. A port with two simultaneous slots is seeded as two
+named jetties of one slot each (`KOYAL-JETTY-1`, `KOYAL-JETTY-2`), so a scenario can take
+one of them out and leave the other working. Pump rate, berthing hours and draft limit are
+port-level and repeat across a port's berths.
+
 ## Seeded history — Apr, May and Jun 2026
 
 Those three months are seeded **closed** so cost can be trended before anyone has run a month for

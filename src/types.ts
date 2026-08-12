@@ -142,6 +142,47 @@ export interface ReplanDecision {
   recommend: string;
 }
 
+// --- Scenario composition --------------------------------------------------
+// A scenario is an ordered LIST of events — any number of any type. The server
+// compiles it to engine options, so the UI never has to fold them itself.
+
+export type ScenarioEventType =
+  | 'DEMAND_REVISION' | 'SPOT_CARGO' | 'TANK_OUTAGE'
+  | 'PORT_CLOSURE' | 'VESSEL_DELAY' | 'VESSEL_OUTAGE';
+
+interface EventBase { id: string; type: ScenarioEventType; note?: string | null }
+export interface DemandRevisionEvent extends EventBase {
+  type: 'DEMAND_REVISION'; locationId: string; productId: string;
+  side: 'OUT' | 'IN'; basis: 'ABS' | 'DELTA' | 'PCT'; value: number;
+  fromDay?: number | null; toDay?: number | null;
+}
+export interface SpotCargoEvent extends EventBase {
+  type: 'SPOT_CARGO'; locationId: string; productId: string;
+  qty: number; day: number; direction: 'DRAW' | 'RECEIPT';
+}
+export interface TankOutageEvent extends EventBase {
+  type: 'TANK_OUTAGE'; locationId: string; productId: string; fromDay: number; toDay: number;
+}
+export interface PortClosureEvent extends EventBase {
+  type: 'PORT_CLOSURE'; locationId: string; berthId?: string | null;
+  fromDay: number; toDay: number; capacityPct?: number | null;
+}
+export interface VesselDelayEvent extends EventBase {
+  type: 'VESSEL_DELAY'; vesselId: string; basis: 'ABS' | 'SLIP'; value: number;
+}
+export interface VesselOutageEvent extends EventBase {
+  type: 'VESSEL_OUTAGE'; vesselId: string; fromDay?: number | null; toDay?: number | null;
+}
+export type ScenarioEvent =
+  | DemandRevisionEvent | SpotCargoEvent | TankOutageEvent
+  | PortClosureEvent | VesselDelayEvent | VesselOutageEvent;
+
+export interface SavedScenario {
+  id: string; stream: string; name: string; description: string | null;
+  events: ScenarioEvent[]; asOfDay: number; mode: string;
+  createdAt: string; updatedAt: string;
+}
+
 /** Cross-view navigation context: land on a tab focused on a specific entity. */
 export type Focus = { node?: { loc: string; product: string }; tankId?: string; vesselId?: string; locationId?: string } | null;
 export type Goto = (tab: string, focus?: Focus) => void;

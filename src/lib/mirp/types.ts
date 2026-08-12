@@ -52,21 +52,45 @@ export interface EngineInput {
   options?: EngineOptions;
 }
 
-export interface FlowOverride { locationId: string; productId: string; dailyIn?: number; dailyOut?: number; }
-export interface EmergencyDemand { locationId: string; productId: string; qty: number; day: number; }
+/** Revised daily production (in) / consumption (out). Windowed: absent days keep the base rate. */
+export interface FlowOverride {
+  locationId: string; productId: string;
+  dailyIn?: number; dailyOut?: number;
+  fromDay?: number; toDay?: number;       // default: whole horizon
+}
+/** A one-off inventory movement outside the daily rate: extra draw, or an unexpected receipt. */
+export interface EmergencyDemand {
+  locationId: string; productId: string; qty: number; day: number;
+  direction?: 'DRAW' | 'RECEIPT';         // default DRAW
+}
 export interface TankOutage { locationId: string; productId: string; fromDay: number; toDay: number; }
-export interface PortClosure { locationId: string; fromDay: number; toDay: number; }   // berth shut for a window
-export interface VesselDelay { vesselId: string; availFromDay: number; }                // vessel free only from this day
+/**
+ * Port or berth unavailable / degraded for a window.
+ * - no berthId, no capacityPct → whole port shut; ships wait at anchorage
+ * - berthId, no capacityPct    → that berth down; the port runs on what's left
+ * - capacityPct                → open but degraded (reduced pumping rate)
+ */
+export interface PortClosure {
+  locationId: string; berthId?: string | null;
+  fromDay: number; toDay: number;
+  capacityPct?: number | null;            // 1..99 = degraded throughput
+  reason?: string | null;
+}
+/** Vessel free only from this day (laycan slip, repair, Cape re-route). */
+export interface VesselDelay { vesselId: string; availFromDay: number; reason?: string | null; }
+/** Vessel unavailable across a window (drydock, off-hire, survey) — not just from a day. */
+export interface VesselOutage { vesselId: string; fromDay: number; toDay: number; reason?: string | null; }
 
 export interface EngineOptions {
   seed?: number;
   alnsIterations?: number;
-  excludeVessels?: string[];              // diverted / unavailable vessels
-  emergencyDemands?: EmergencyDemand[];   // sudden one-off demand spikes
+  excludeVessels?: string[];              // out for the whole horizon (diverted / unavailable)
+  vesselOutages?: VesselOutage[];         // out for a window (drydock, off-hire)
+  emergencyDemands?: EmergencyDemand[];   // one-off draws / receipts
   tankOutages?: TankOutage[];             // tank unavailable for a day range
   flowOverrides?: FlowOverride[];         // revised daily production/consumption
-  portClosures?: PortClosure[];           // berth/port shut for a window (weather, swell, SPM fault, congestion) — ships wait it out
-  vesselDelays?: VesselDelay[];           // vessel available only from a later day (laycan slip, off-hire repair, Cape re-route)
+  portClosures?: PortClosure[];           // port/berth shut or degraded for a window
+  vesselDelays?: VesselDelay[];           // vessel available only from a later day
   asOfDay?: number;                       // "today" — voyages before this are committed/frozen
   mode?: string;                          // recovery posture (minimal-change | cost-optimal)
   frozenVoyages?: Voyage[];               // committed voyages preserved by a rolling-horizon replan
@@ -75,6 +99,59 @@ export interface EngineOptions {
   safetyDays?: number;                    // arrive this many days before dry-out (default 2)
   turnaroundDays?: number;                // buffer between a vessel's voyages (default 1)
 }
+
+// --- Scenario events -------------------------------------------------------
+// What the planner composes. A scenario is an ordered LIST of events, any number
+// of any type; the server compiles it down to EngineOptions (see compileEvents).
+// Keeping events as the authored form — rather than pre-folded options — is what
+// lets a scenario be listed, edited, named and re-run.
+
+export type ScenarioEventType =
+  | 'DEMAND_REVISION' | 'SPOT_CARGO' | 'TANK_OUTAGE'
+  | 'PORT_CLOSURE' | 'VESSEL_DELAY' | 'VESSEL_OUTAGE';
+
+interface EventBase { id: string; type: ScenarioEventType; note?: string | null }
+
+/** Revised offtake or production at a node. Entered absolute, as a delta, or as a percentage. */
+export interface DemandRevisionEvent extends EventBase {
+  type: 'DEMAND_REVISION';
+  locationId: string; productId: string;
+  side: 'OUT' | 'IN';                     // OUT = offtake/lifting, IN = production/receipt
+  basis: 'ABS' | 'DELTA' | 'PCT';
+  value: number;                          // MT/day for ABS & DELTA, percent for PCT
+  fromDay?: number | null; toDay?: number | null;
+}
+export interface SpotCargoEvent extends EventBase {
+  type: 'SPOT_CARGO';
+  locationId: string; productId: string;
+  qty: number; day: number;
+  direction: 'DRAW' | 'RECEIPT';
+}
+export interface TankOutageEvent extends EventBase {
+  type: 'TANK_OUTAGE';
+  locationId: string; productId: string; fromDay: number; toDay: number;
+}
+export interface PortClosureEvent extends EventBase {
+  type: 'PORT_CLOSURE';
+  locationId: string; berthId?: string | null;
+  fromDay: number; toDay: number;
+  capacityPct?: number | null;            // null/absent = fully shut
+}
+export interface VesselDelayEvent extends EventBase {
+  type: 'VESSEL_DELAY';
+  vesselId: string;
+  basis: 'ABS' | 'SLIP';                  // ABS = ready on this day, SLIP = n days later than planned
+  value: number;
+}
+export interface VesselOutageEvent extends EventBase {
+  type: 'VESSEL_OUTAGE';
+  vesselId: string;
+  fromDay?: number | null; toDay?: number | null;  // both absent = out for the whole horizon
+}
+
+export type ScenarioEvent =
+  | DemandRevisionEvent | SpotCargoEvent | TankOutageEvent
+  | PortClosureEvent | VesselDelayEvent | VesselOutageEvent;
 
 // --- Solve outputs ---------------------------------------------------------
 

@@ -155,6 +155,23 @@ export const actuals = sqliteTable('actuals', {
   createdAt: text('created_at').notNull(),
 });
 
+/**
+ * A named what-if: an ordered list of disruption events, any number of any type.
+ * Stored as authored (not as compiled EngineOptions) so it can be reopened,
+ * edited and re-run against a different month.
+ */
+export const scenarios = sqliteTable('scenarios', {
+  id: text('id').primaryKey(),
+  stream: text('stream').notNull(),
+  name: text('name').notNull(),
+  description: text('description'),
+  events: text('events', { mode: 'json' }).$type<unknown[]>().notNull().default([]),
+  asOfDay: integer('as_of_day').notNull().default(0),
+  mode: text('mode').notNull().default('minimal-edit'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+});
+
 // ---------------------------------------------------------------------------
 // Solve outputs (persisted, versioned).
 // ---------------------------------------------------------------------------

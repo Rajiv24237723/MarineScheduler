@@ -17,17 +17,40 @@ export function validate(input: EngineInput, voyages: Voyage[]): { ok: boolean; 
   for (const b of input.berths) { if (!berthsByLoc.has(b.locationId)) berthsByLoc.set(b.locationId, [] as any); berthsByLoc.get(b.locationId)!.push(b); }
   const closures = input.options?.portClosures ?? [];
   const vDelay = new Map((input.options?.vesselDelays ?? []).map(d => [d.vesselId, d.availFromDay]));
+  const outages = input.options?.vesselOutages ?? [];
+  // A voyage that began before "today" is physically underway. Declaring its hull
+  // delayed or off-hire cannot un-sail it, so hull-availability is only checked on
+  // voyages the planner can still change. Port closures stay in scope either way —
+  // a committed ship arriving at a shut berth is a real problem to resolve.
+  const asOf = Math.max(0, input.options?.asOfDay ?? 0);
+  // A closure only makes a call impossible when it leaves no berthing slot at all;
+  // a single berth down or degraded throughput is congestion, not a breach.
+  const slotsOn = (loc: string, day: number) => {
+    const bs = berthsByLoc.get(loc);
+    let slots = bs?.length ? bs.reduce((s, b) => s + b.nsim, 0) : 99;
+    for (const c of closures) {
+      if (c.locationId !== loc || day < c.fromDay || day > c.toDay) continue;
+      if (c.capacityPct != null) continue;
+      if (!c.berthId) return 0;
+      slots -= bs?.find(b => b.id === c.berthId)?.nsim ?? slots;
+    }
+    return Math.max(0, slots);
+  };
 
   for (const voy of voyages) {
     const v = vesselByName.get(voy.vesselName);
-    // Delay disruptions invalidate a committed voyage that rides a not-yet-available hull or
-    // calls a berth during its closure window.
+    // Delay disruptions invalidate a committed voyage that rides a not-yet-available hull,
+    // sails through the hull's off-hire window, or calls a port with no berth open.
+    const committed = voy.startDay < asOf;
     const dd = voy.vesselId ? vDelay.get(voy.vesselId) : undefined;
-    if (dd != null && voy.startDay < dd)
+    if (!committed && dd != null && voy.startDay < dd)
       breaches.push(`Delay: ${voy.vesselName} not ready until day ${dd} (voyage starts day ${voy.startDay})`);
-    for (const s of voy.stops) for (const c of closures)
-      if (s.locationId === c.locationId && s.arriveDay >= c.fromDay && s.arriveDay <= c.toDay)
-        breaches.push(`Closure: ${locName.get(c.locationId) ?? c.locationId} shut days ${c.fromDay}–${c.toDay} when ${voy.vesselName} calls on day ${s.arriveDay}`);
+    if (!committed && voy.vesselId) for (const o of outages)
+      if (o.vesselId === voy.vesselId && voy.startDay <= o.toDay && voy.endDay >= o.fromDay)
+        breaches.push(`Off-hire: ${voy.vesselName} out days ${o.fromDay}–${o.toDay} but voyage runs ${voy.startDay}–${voy.endDay}`);
+    for (const s of voy.stops)
+      if (slotsOn(s.locationId, s.arriveDay) === 0)
+        breaches.push(`Closure: ${locName.get(s.locationId) ?? s.locationId} has no berth open when ${voy.vesselName} calls on day ${s.arriveDay}`);
     const capById = new Map((v?.compartments ?? []).map(c => [c.id, c.cap]));
     const totalCap = Math.max(1, (v?.compartments ?? []).reduce((s, c) => s + c.cap, 0));
     // Draft alongside scales with cargo aboard: ballast → laden across the compartment fill.
@@ -46,6 +69,9 @@ export function validate(input: EngineInput, voyages: Voyage[]): { ok: boolean; 
         const cap = capById.get(op.compartmentId);
         if (cap !== undefined && op.qty > cap + 1e-6)
           breaches.push(`Capacity: ${op.qty} MT into ${voy.vesselName}/${op.compartmentId} (cap ${cap})`);
+        // A tank out of service can neither receive nor dispatch.
+        if (inv.outageOn(stop.locationId, op.productId, stop.arriveDay))
+          breaches.push(`Tank outage: ${locName.get(stop.locationId) ?? stop.locationId}/${prodName.get(op.productId) ?? op.productId} out of service on day ${stop.arriveDay} when ${voy.vesselName} ${op.op === 'LOAD' ? 'lifts' : 'discharges'}`);
         // Apply to inventory on the arrival day (matches the engine's bookkeeping).
         inv.addOp(stop.locationId, op.productId, stop.arriveDay, op.op === 'LOAD' ? -op.qty : op.qty);
       }

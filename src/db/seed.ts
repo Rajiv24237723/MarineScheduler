@@ -280,6 +280,16 @@ export async function seed(db: any) {
   ];
   const productCompatibility = compat.map(([stream, from, to, allowed, hrs, cost], i) => ({ id: `pc_${i + 1}`, stream, scope: 'COMPARTMENT', fromProduct: from, toProduct: to, allowed, changeoverHours: hrs, changeoverCost: cost }));
 
+  // ---- One row per berth, not one row per port -----------------------------
+  // A port with two simultaneous slots is two jetties, and a scenario needs to be
+  // able to take one of them out. Expand any multi-slot row into named singles.
+  const singleBerths: any[] = [];
+  for (const b of berths) {
+    if (b.nsim <= 1) { singleBerths.push(b); continue; }
+    for (let i = 1; i <= b.nsim; i++) singleBerths.push({ ...b, id: `${b.id}_${i}`, name: `${b.name}-${i}`, nsim: 1 });
+  }
+  berths.length = 0; berths.push(...singleBerths);
+
   // ---- Planning periods, and three settled months of history ---------------
   // Jul 2026 is the live planning month and is left empty — it gets its versions
   // from the optimiser. Apr–Jun are closed months carrying a frozen baseline, the
