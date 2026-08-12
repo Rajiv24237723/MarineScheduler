@@ -1,9 +1,9 @@
-﻿import { DashboardData, Tank, Focus } from '../types';
+﻿import { DashboardData, Tank, Focus, horizonStartDate } from '../types';
 import { TankGauge } from '@/components/ui/TankGauge';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
 import { format, addDays } from 'date-fns';
 
-const START = new Date('2026-07-01T00:00:00Z');
+const START = () => horizonStartDate();
 
 /** Shared tank-detail body: large gauge, metrics, projection sparkline, incoming
  *  parcels. Used by the Tank Farm grid and the Inventory Forecast at-risk list. */
@@ -14,7 +14,7 @@ export function TankDetail({ tank, data, onNavigate }: { tank: Tank; data: Dashb
     .flatMap(s => s.ops.filter(o => o.op === 'DISCHARGE' && o.productId === tank.productId).map(o => ({ qty: o.qty, day: s.arriveDay, vessel: v.vesselName }))))
     .sort((a, b) => a.day - b.day);
   const pr = data.projection?.find(x => x.locationId === tank.locationId && x.productId === tank.productId);
-  const series = (pr?.series ?? []).map(s => ({ date: format(addDays(START, s.day), 'MMM d'), stock: s.stock }));
+  const series = (pr?.series ?? []).map(s => ({ date: format(addDays(START(), s.day), 'MMM d'), stock: s.stock }));
   const flow = data.nodeFlows?.find(f => f.locationId === tank.locationId && f.productId === tank.productId);
   const dailyIn = flow?.dailyIn ?? 0, dailyOut = flow?.dailyOut ?? 0, net = dailyIn - dailyOut;
   const ullage = Math.max(0, tank.capacity - tank.currentStock);       // headroom to tank-top
@@ -72,7 +72,7 @@ export function TankDetail({ tank, data, onNavigate }: { tank: Tank; data: Dashb
               inc.map((i, idx) => (
                 <div key={idx} className="flex justify-between text-[11px] bg-background/50 px-2 py-1 rounded-md border border-border/60">
                   <span className="text-foreground/80">{i.vessel}</span>
-                  <span className="text-muted-foreground">{i.qty.toLocaleString()} MT · {format(addDays(START, i.day), 'MMM d')}</span>
+                  <span className="text-muted-foreground">{i.qty.toLocaleString()} MT · {format(addDays(START(), i.day), 'MMM d')}</span>
                 </div>
               ))}
           </div>

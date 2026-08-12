@@ -70,10 +70,11 @@ export default function DemandUploadView({ data, stream, refresh }: { data: Dash
     if (!okRows.length) return;
     setBusy(true);
     try {
-      const planRows = okRows.map(r => ({ stream, kind: 'DEMAND', productId: r.prodId, locationId: r.destId, qty: r.monthly, windowStart: '2026-07-01', windowEnd: '2026-07-31', priority: r.priority }));
+      const p = data.period;
+      const planRows = okRows.map(r => ({ stream, periodId: p?.id ?? null, kind: 'DEMAND', productId: r.prodId, locationId: r.destId, qty: r.monthly, windowStart: p?.startDate ?? '', windowEnd: p?.endDate ?? '', priority: r.priority }));
       await fetch(`/api/master/planLines/bulk`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rows: planRows, replaceStream: stream }) });
       await refresh();
-      toast(`Loaded ${planRows.length} movement(s) as the ${stream} July plan (review). Open Operational Plan → Run optimiser to generate voyages.`, 'success');
+      toast(`Loaded ${planRows.length} movement(s) as the ${stream} ${p?.label ?? ''} plan (review). Open Operational Plan → Run optimiser to generate voyages.`, 'success');
     } catch (e) { console.error(e); toast('Load failed.', 'error'); }
     setBusy(false);
   };

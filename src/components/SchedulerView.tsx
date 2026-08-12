@@ -1,5 +1,5 @@
 ﻿import { useState } from 'react';
-import { DashboardData, Voyage, Goto } from '../types';
+import { DashboardData, Voyage, Goto, horizonStartDate } from '../types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Modal } from '@/components/ui/modal';
 import { Pennant } from '@/components/ui/SignalFlag';
@@ -7,7 +7,7 @@ import { Tip, TipRows } from '@/components/ui/tooltip';
 import { VoyageDetail } from './VoyageDetail';
 import { format, addDays } from 'date-fns';
 
-const START = new Date('2026-07-01T00:00:00Z');
+const START = () => horizonStartDate();
 const fmtM = (n: number) => `₹${(n / 1e6).toFixed(1)}M`;
 
 export default function SchedulerView({ data, onOptimize, optimizing, goto }: { data: DashboardData; stream: string; onOptimize: () => void; optimizing: boolean; goto?: Goto }) {
@@ -15,7 +15,7 @@ export default function SchedulerView({ data, onOptimize, optimizing, goto }: { 
   const prod = (id: string) => data.products.find(p => p.id === id);
   const loc = (id: string) => data.locations.find(l => l.id === id)?.name ?? id;
   const voyages = [...data.voyages].sort((a, b) => a.vesselName.localeCompare(b.vesselName) || a.startDay - b.startDay);
-  const maxDay = Math.max(31, ...voyages.map(v => v.endDay));
+  const maxDay = Math.max(data.period?.horizonDays ?? 30, ...voyages.map(v => v.endDay));
   const k = data.kpis;
   const achievable = (data.unserved?.length ?? 0) === 0 && voyages.length > 0;
   const hasPlan = voyages.length > 0 || (data.versions?.length ?? 0) > 0;
@@ -67,7 +67,7 @@ export default function SchedulerView({ data, onOptimize, optimizing, goto }: { 
               <div key={i} className="flex justify-between items-center gap-3 bg-background/50 p-2.5 rounded-md border border-border/80 text-xs">
                 <div>
                   <div className="text-foreground/90"><span className="text-warn font-medium">Charter {r.vesselClass}</span> · {prod(r.productId)?.name ?? r.productId} {r.qty ? `${Math.round(r.qty / 1000)}k MT` : ''}</div>
-                  <div className="text-[11px] text-muted-foreground mt-0.5">{r.fromLoc ? loc(r.fromLoc) : 'source'} → <button onClick={() => goto?.('inventory', { node: { loc: r.toLoc, product: r.productId } })} className="hover:text-cyan-300 underline-offset-2 hover:underline">{loc(r.toLoc)}</button> · by {format(addDays(START, r.byDay || 0), 'MMM d')}</div>
+                  <div className="text-[11px] text-muted-foreground mt-0.5">{r.fromLoc ? loc(r.fromLoc) : 'source'} → <button onClick={() => goto?.('inventory', { node: { loc: r.toLoc, product: r.productId } })} className="hover:text-cyan-300 underline-offset-2 hover:underline">{loc(r.toLoc)}</button> · by {format(addDays(START(), r.byDay || 0), 'MMM d')}</div>
                 </div>
                 {r.estCost > 0 && <span className="font-mono text-warn whitespace-nowrap">{fmtM(r.estCost)}</span>}
               </div>
@@ -115,7 +115,7 @@ export default function SchedulerView({ data, onOptimize, optimizing, goto }: { 
             <div className="w-44 p-2 text-[11px] font-medium text-muted-foreground/80 border-r border-border/60 shrink-0">Vessel</div>
             <div className="flex-1 relative h-8">
               {Array.from({ length: Math.ceil(maxDay / 7) + 1 }).map((_, i) => (
-                <div key={i} className="absolute top-0 h-full border-l border-border/40 border-dashed text-[9px] text-muted-foreground/70 pl-1" style={{ left: `${(i * 7 / maxDay) * 100}%` }}>{format(addDays(START, i * 7), 'MMM d')}</div>
+                <div key={i} className="absolute top-0 h-full border-l border-border/40 border-dashed text-[9px] text-muted-foreground/70 pl-1" style={{ left: `${(i * 7 / maxDay) * 100}%` }}>{format(addDays(START(), i * 7), 'MMM d')}</div>
               ))}
             </div>
           </div>
@@ -124,7 +124,7 @@ export default function SchedulerView({ data, onOptimize, optimizing, goto }: { 
             const mt = v.stops.flatMap(s => s.ops).filter(o => o.op === 'LOAD').reduce((a, o) => a + o.qty, 0);
             return (
               <div key={v.id} className="flex border-b border-border/60 hover:bg-muted/20 cursor-pointer" onClick={() => setModalVoyage(v)}>
-                <Tip side="right" content={<TipRows title={v.vesselName} rows={[['Class', v.vesselClass], ['Charter', v.pool], ['MT loaded', `${Math.round(mt / 1000)}k`], ['Window', `${format(addDays(START, v.startDay), 'MMM d')}–${format(addDays(START, v.endDay), 'MMM d')}`], ['Stops', String(v.stops.length)], ['Cost', fmtM(v.cost)]]} />}>
+                <Tip side="right" content={<TipRows title={v.vesselName} rows={[['Class', v.vesselClass], ['Charter', v.pool], ['MT loaded', `${Math.round(mt / 1000)}k`], ['Window', `${format(addDays(START(), v.startDay), 'MMM d')}–${format(addDays(START(), v.endDay), 'MMM d')}`], ['Stops', String(v.stops.length)], ['Cost', fmtM(v.cost)]]} />}>
                   <div className="w-44 p-2 border-r border-border/60 shrink-0">
                     <div className="font-mono text-xs text-foreground/90 font-semibold">{v.vesselName}</div>
                     <div className="text-[10px] text-muted-foreground/80">{v.vesselClass} · <span className={v.pool === 'SPOT' ? 'text-warn' : ''}>{v.pool}</span> · {fmtM(v.cost)}</div>
@@ -133,7 +133,7 @@ export default function SchedulerView({ data, onOptimize, optimizing, goto }: { 
                 <div className="flex-1 relative min-h-[46px] py-2">
                   <div className="absolute top-1/2 -translate-y-1/2 h-3 rounded-full opacity-40" style={{ left: `${(v.startDay / maxDay) * 100}%`, width: `${Math.max(1, (v.endDay - v.startDay) / maxDay * 100)}%`, backgroundColor: pcol }} />
                   {v.stops.map(s => (
-                    <Tip key={s.seq} content={<div className="max-w-xs"><div className="font-medium text-foreground/90">{s.kind} · {loc(s.locationId)}</div><div className="text-muted-foreground">{format(addDays(START, s.arriveDay), 'MMM d')}</div><div className="mt-1 space-y-0.5">{s.ops.map((o, oi) => <div key={oi} className="flex justify-between gap-3"><span className="text-muted-foreground">{prod(o.productId)?.name} → {o.compartmentId}</span><span className="font-mono text-foreground/90">{(o.qty / 1000).toFixed(1)}k</span></div>)}</div></div>}>
+                    <Tip key={s.seq} content={<div className="max-w-xs"><div className="font-medium text-foreground/90">{s.kind} · {loc(s.locationId)}</div><div className="text-muted-foreground">{format(addDays(START(), s.arriveDay), 'MMM d')}</div><div className="mt-1 space-y-0.5">{s.ops.map((o, oi) => <div key={oi} className="flex justify-between gap-3"><span className="text-muted-foreground">{prod(o.productId)?.name} → {o.compartmentId}</span><span className="font-mono text-foreground/90">{(o.qty / 1000).toFixed(1)}k</span></div>)}</div></div>}>
                       <div className="absolute top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full border-2 border-background hover:scale-150 transition-transform"
                         style={{ left: `calc(${(s.arriveDay / maxDay) * 100}% - 5px)`, backgroundColor: s.kind === 'LOAD' ? 'var(--sea-sand)' : 'var(--sea-green)' }} />
                     </Tip>

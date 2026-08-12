@@ -1,13 +1,13 @@
-﻿import { useState } from 'react';
-import { DashboardData, Voyage, ReplanThresholds } from '../types';
+﻿import { useEffect, useState } from 'react';
+import { DashboardData, Voyage, ReplanThresholds, horizonStartDate } from '../types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Modal } from '@/components/ui/modal';
 import { toast } from './ui/toast';
 import { VoyageDetail } from './VoyageDetail';
-import { GitCompare, AlertTriangle, CheckCircle2, Ship, Anchor, Snowflake, Plus, Layers } from 'lucide-react';
+import { GitCompare, AlertTriangle, CheckCircle2, Ship, Anchor, Snowflake, Plus, Layers, Flag } from 'lucide-react';
 import { format, addDays } from 'date-fns';
 
-const START = new Date('2026-07-01T00:00:00Z');
+const START = () => horizonStartDate();
 const fmtM = (n: number) => `${n >= 0 ? '+' : ''}₹${(n / 1e6).toFixed(1)}M`;
 const money = (n: number) => `₹${(n / 1e6).toFixed(1)}M`;
 // Replan-decision level → tone + one-word gloss.
@@ -23,18 +23,22 @@ export default function ReplanningView({ data, stream, refresh, thresholds }: { 
   const versions = data.versions ?? [];
   const active = versions.find(v => v.status === 'Active');
   const loc = (id: string | null) => id ? (data.locations.find(l => l.id === id)?.name ?? id) : 'source';
+  const periodLabel = (id: string | null | undefined) => (data.periods ?? []).find(p => p.id === id)?.label ?? '—';
   const prod = (id: string) => data.products.find(p => p.id === id)?.name ?? id;
   const demandNodes = data.nodeFlows.filter(f => f.dailyOut > 0);
 
-  // Planning posture
-  const [asOf, setAsOf] = useState(12);
+  // Planning posture. Day bounds and the default event window follow the period's
+  // horizon rather than a fixed 30-day month.
+  const horizon = data.period?.horizonDays ?? 30;
+  const day = (frac: number) => String(Math.round(horizon * frac));
+  const [asOf, setAsOf] = useState(Math.round(horizon * 0.4));
   const [mode, setMode] = useState('minimal-edit');
 
   // Disruption events
   const [flowNode, setFlowNode] = useState(''); const [flowVal, setFlowVal] = useState('');
-  const [spotNode, setSpotNode] = useState(''); const [spotQty, setSpotQty] = useState('60000'); const [spotDay, setSpotDay] = useState('20');
-  const [closureLoc, setClosureLoc] = useState(''); const [closeFrom, setCloseFrom] = useState('14'); const [closeTo, setCloseTo] = useState('24');
-  const [delayVessel, setDelayVessel] = useState(''); const [delayDay, setDelayDay] = useState('12');
+  const [spotNode, setSpotNode] = useState(''); const [spotQty, setSpotQty] = useState('60000'); const [spotDay, setSpotDay] = useState(day(0.67));
+  const [closureLoc, setClosureLoc] = useState(''); const [closeFrom, setCloseFrom] = useState(day(0.47)); const [closeTo, setCloseTo] = useState(day(0.8));
+  const [delayVessel, setDelayVessel] = useState(''); const [delayDay, setDelayDay] = useState(day(0.4));
   const [vesselOut, setVesselOut] = useState<Set<string>>(new Set());
 
   const [busy, setBusy] = useState(false);
@@ -42,7 +46,15 @@ export default function ReplanningView({ data, stream, refresh, thresholds }: { 
   const [draft, setDraft] = useState<any>(null);
   const [candidates, setCandidates] = useState<any>(null);
 
-  const [a, setA] = useState(versions[1]?.id ?? ''); const [b, setB] = useState(versions[0]?.id ?? '');
+  // Default the compare pair to the two newest versions, and re-point it whenever
+  // a solve/publish/discard changes the list — otherwise the selects show options
+  // the state no longer holds and Compare silently does nothing.
+  const [a, setA] = useState(''); const [b, setB] = useState('');
+  useEffect(() => {
+    const ids = new Set(versions.map(v => v.id));
+    if (!ids.has(a)) setA(versions[1]?.id ?? versions[0]?.id ?? '');
+    if (!ids.has(b)) setB(versions[0]?.id ?? '');
+  }, [versions, a, b]);
   const [cmp, setCmp] = useState<any>(null);
   const [versionVoyages, setVersionVoyages] = useState<{ v: number; voyages: Voyage[] } | null>(null);
   const [voyageModal, setVoyageModal] = useState<Voyage | null>(null);
@@ -90,8 +102,8 @@ export default function ReplanningView({ data, stream, refresh, thresholds }: { 
       <Card className="bg-card/50 border-border/80 rounded-md">
         <CardContent className="p-4 grid grid-cols-2 gap-6">
           <div>
-            <div className="flex justify-between text-xs mb-1"><label className="text-muted-foreground flex items-center gap-1.5"><Snowflake className="w-3.5 h-3.5 text-cyan-400" /> Planning as of (freeze committed voyages before)</label><span className="font-mono text-foreground/90">{format(addDays(START, asOf), 'MMM d')} (day {asOf})</span></div>
-            <input type="range" min={0} max={40} value={asOf} onChange={e => setAsOf(Number(e.target.value))} className="w-full accent-cyan-500" />
+            <div className="flex justify-between text-xs mb-1"><label className="text-muted-foreground flex items-center gap-1.5"><Snowflake className="w-3.5 h-3.5 text-cyan-400" /> Planning as of (freeze committed voyages before)</label><span className="font-mono text-foreground/90">{format(addDays(START(), asOf), 'MMM d')} (day {asOf})</span></div>
+            <input type="range" min={0} max={horizon} value={asOf} onChange={e => setAsOf(Number(e.target.value))} className="w-full accent-cyan-500" />
             <div className="text-[10px] text-muted-foreground/70 mt-0.5">Voyages already underway before this date are locked; only the future is re-planned.</div>
           </div>
           <div>
@@ -273,6 +285,8 @@ export default function ReplanningView({ data, stream, refresh, thresholds }: { 
                 <button onClick={() => openVersion(v.id, v.version)} className="flex items-center gap-3 text-left">
                   <span className="font-mono text-foreground/90">v{v.version}</span>
                   <span className={`px-1.5 py-0.5 rounded-md text-[9px] ${v.status === 'Active' ? 'bg-ok/10 text-ok border border-ok/20' : v.status === 'Draft' ? 'bg-cyan-500/10 text-cyan-300 border border-cyan-500/20' : 'bg-muted text-muted-foreground border border-border/60'}`}>{v.status}</span>
+                  {v.isBaseline === 1 && <span className="px-1.5 py-0.5 rounded-md text-[9px] bg-cyan-500/10 text-cyan-300 border border-cyan-500/20 flex items-center gap-1"><Flag className="w-2.5 h-2.5" /> baseline</span>}
+                  <span className="text-[10px] text-muted-foreground/80">{periodLabel(v.periodId)}</span>
                   <span className="text-muted-foreground">{v.trigger}</span>
                   <span className={v.achievable ? 'text-ok' : 'text-bad'}>{v.achievable ? 'achievable' : 'shortfall'}</span>
                 </button>

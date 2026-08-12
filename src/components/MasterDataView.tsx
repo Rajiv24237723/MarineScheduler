@@ -32,9 +32,9 @@ const TABS: Record<string, { table: string; cols: Col[]; rows: (d: DashboardData
     rows: d => d.nodeFlows, make: (s, d) => ({ stream: s, locationId: d.locations[0]?.id, productId: d.products[0]?.id, dailyIn: 0, dailyOut: 3000 }),
   },
   'Plan Lines': {
-    table: 'planLines', note: 'Monthly demand/supply summary with delivery windows (informational).',
+    table: 'planLines', note: 'Monthly demand/supply summary with delivery windows, scoped to the open planning period (informational).',
     cols: [{ key: 'kind', label: 'Kind' }, { key: 'productId', label: 'Product' }, { key: 'locationId', label: 'Location' }, { key: 'qty', label: 'Qty', num: true }, { key: 'windowStart', label: 'From' }, { key: 'windowEnd', label: 'To' }, { key: 'priority', label: 'Prio', num: true }],
-    rows: d => d.planLines, make: (s, d) => ({ stream: s, kind: 'DEMAND', productId: d.products[0]?.id, locationId: d.locations[0]?.id, qty: 50000, windowStart: '2026-07-01', windowEnd: '2026-08-31', priority: 1 }),
+    rows: d => d.planLines, make: (s, d) => ({ stream: s, periodId: d.period?.id ?? null, kind: 'DEMAND', productId: d.products[0]?.id, locationId: d.locations[0]?.id, qty: 50000, windowStart: d.period?.startDate ?? '', windowEnd: d.period?.endDate ?? '', priority: 1 }),
   },
   Berths: {
     table: 'berths', cols: [{ key: 'locationId', label: 'Location' }, { key: 'name', label: 'Name' }, { key: 'nsim', label: 'N-sim', num: true }, { key: 'rateMtPerHr', label: 'Rate MT/h', num: true }, { key: 'berthingHours', label: 'Berth h', num: true }, { key: 'maxDraft', label: 'Max draft', num: true }],

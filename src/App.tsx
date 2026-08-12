@@ -4,8 +4,8 @@
  */
 
 import { useState, useEffect, useCallback, ReactNode } from 'react';
-import { Ship, LayoutDashboard, CalendarDays, Factory, Map as MapIcon, Settings, AlertTriangle, Database, TrendingUp, Bell, Upload } from 'lucide-react';
-import { DashboardData, Focus, ReplanThresholds, DEFAULT_THRESHOLDS } from './types';
+import { Ship, LayoutDashboard, CalendarDays, Factory, Map as MapIcon, Settings, AlertTriangle, Database, TrendingUp, Bell, Upload, Scale } from 'lucide-react';
+import { DashboardData, Focus, ReplanThresholds, DEFAULT_THRESHOLDS, setHorizonStart } from './types';
 import { Toaster, TopProgress, toast } from './components/ui/toast';
 import { StreamFlag, Pennant } from './components/ui/SignalFlag';
 import { TipProvider, Tip } from './components/ui/tooltip';
@@ -18,6 +18,7 @@ import MasterDataView from './components/MasterDataView';
 import InventoryView from './components/InventoryView';
 import SettingsView from './components/SettingsView';
 import DemandUploadView from './components/DemandUploadView';
+import PerformanceView from './components/PerformanceView';
 import { GenerationConsole } from './components/GenerationConsole';
 import { cn } from './lib/utils';
 
@@ -32,7 +33,11 @@ export default function App() {
 
   const load = useCallback(async () => {
     const r = await fetch(`/api/dashboard?stream=${stream}`);
-    setData(await r.json());
+    const d: DashboardData = await r.json();
+    // Day indices are relative to the open planning period, so every date label
+    // in every view follows whichever month is being planned.
+    setHorizonStart(d.period?.startDate);
+    setData(d);
   }, [stream]);
 
   useEffect(() => { setData(null); load().catch(console.error); }, [load]);
@@ -101,6 +106,12 @@ export default function App() {
       items: [
         { id: 'tanks', label: 'Tank Farm', icon: Factory },
         { id: 'inventory', label: 'Network Forecast', icon: TrendingUp },
+      ]
+    },
+    {
+      label: 'Performance',
+      items: [
+        { id: 'performance', label: 'Cost & Variance', icon: Scale },
       ]
     },
     {
@@ -204,7 +215,10 @@ export default function App() {
             <div className="flex items-stretch">
               {readout('Served', `${data.kpis?.demandServedPct ?? 0}%`, (data.kpis?.demandServedPct ?? 0) >= 100 ? 'text-ok' : 'text-warn', `${data.kpis?.demandServedPct ?? 0}% of ${stream} horizon demand met${(data.unserved?.length ?? 0) ? ` · ${data.unserved.length} node(s) short` : ' · all nodes within limits'}`)}
               {readout('Voyages', String(data.kpis?.voyageCount ?? 0), 'text-foreground', `${data.kpis?.voyageCount ?? 0} voyage(s) in the active ${stream} plan${data.kpis?.charterRecommendationCount ? ` · ${data.kpis.charterRecommendationCount} charter rec(s)` : ''}`)}
-              {readout('Horizon', 'July', 'text-foreground', 'Start-of-month operating plan: 1–31 Jul 2026 (30 days)')}
+              {readout('Period', data.period?.label ?? '—', 'text-foreground',
+                data.period
+                  ? `${data.period.status === 'Open' ? 'Live planning month' : 'Closed month'}: ${data.period.startDate} → ${data.period.endDate} (${data.period.horizonDays} days)`
+                  : 'No planning period defined for this stream')}
               {alertCount > 0 && (
                 <div className="flex items-center gap-2 pl-4 border-l border-border/50">
                   <Pennant tone={(data.unserved?.length || data.kpis?.dryOutDays) ? 'critical' : 'warn'} size={16} />
@@ -246,6 +260,7 @@ export default function App() {
             {activeTab === 'tanks' && <TankFarmView data={data} goto={goto} focus={focus} />}
             {activeTab === 'tracking' && <TrackingView data={data} goto={goto} />}
             {activeTab === 'replan' && <ReplanningView data={data} stream={stream} refresh={load} thresholds={thresholds} />}
+            {activeTab === 'performance' && <PerformanceView data={data} stream={stream} refresh={load} />}
             {activeTab === 'master' && <MasterDataView stream={stream} data={data} refresh={load} focus={focus} />}
             {activeTab === 'settings' && <SettingsView data={data} stream={stream} attempts={attempts} setAttempts={setAttempts} thresholds={thresholds} setThresholds={setThresholds} onReseed={reseed} />}
           </div>

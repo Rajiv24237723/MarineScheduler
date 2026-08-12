@@ -16,13 +16,44 @@ import { EngineInput, EngineOptions, SolveResult } from './src/lib/mirp/types';
 const app = express();
 app.use(express.json());
 const PORT = 3000;
-const HORIZON_DAYS = 30;          // start-of-month operating plan: 01–31 Jul 2026
+const HORIZON_DAYS = 30;          // fallback when no planning period exists
 const START_DATE = '2026-07-01';
+
+// ---------------------------------------------------------------------------
+// Planning periods. The horizon is driven by the stream's open period, so day
+// indices everywhere are relative to that period's start date.
+// ---------------------------------------------------------------------------
+
+/** The stream's current planning period: the Open one, else the latest by code. */
+async function currentPeriod(stream: string) {
+  const rows = await db.select().from(schema.planPeriods).where(eq(schema.planPeriods.stream, stream));
+  if (!rows.length) return null;
+  const open = rows.filter(p => p.status === 'Open').sort((a, b) => b.code.localeCompare(a.code));
+  return open[0] ?? rows.sort((a, b) => b.code.localeCompare(a.code))[0];
+}
+
+async function periodById(id: string) {
+  const rows = await db.select().from(schema.planPeriods).where(eq(schema.planPeriods.id, id));
+  return rows[0] ?? null;
+}
+
+/** Resolve ?period= (id or code) for a stream, falling back to the current period. */
+async function resolvePeriod(stream: string, ref?: string) {
+  if (ref) {
+    const byId = await periodById(ref);
+    if (byId && byId.stream === stream) return byId;
+    const byCode = await db.select().from(schema.planPeriods)
+      .where(and(eq(schema.planPeriods.stream, stream), eq(schema.planPeriods.code, ref)));
+    if (byCode[0]) return byCode[0];
+  }
+  return currentPeriod(stream);
+}
 
 // ---------------------------------------------------------------------------
 // Load a stream-scoped EngineInput from the database.
 // ---------------------------------------------------------------------------
 async function loadEngineInput(stream: string, options?: EngineOptions): Promise<EngineInput> {
+  const period = await currentPeriod(stream);
   const [products, locations, vessels, tanks, nodeFlows, berths, compatibility, planLines] = await Promise.all([
     db.select().from(schema.products).where(eq(schema.products.stream, stream)),
     db.select().from(schema.locations).where(eq(schema.locations.stream, stream)),
@@ -33,13 +64,34 @@ async function loadEngineInput(stream: string, options?: EngineOptions): Promise
     db.select().from(schema.productCompatibility).where(eq(schema.productCompatibility.stream, stream)),
     db.select().from(schema.planLines).where(eq(schema.planLines.stream, stream)),
   ]);
+  // Plan lines for the current period only (legacy rows with no period stay in scope).
+  const scoped = period ? planLines.filter(l => !l.periodId || l.periodId === period.id) : planLines;
   return {
-    stream, startDate: START_DATE, horizonDays: HORIZON_DAYS,
+    stream,
+    startDate: period?.startDate ?? START_DATE,
+    horizonDays: period?.horizonDays ?? HORIZON_DAYS,
     products: products as any, locations: locations as any, vessels: vessels as any,
     tanks: tanks as any, nodeFlows: nodeFlows as any, berths: berths as any,
-    compatibility: compatibility as any, planLines: planLines as any, options,
+    compatibility: compatibility as any, planLines: scoped as any, options,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Cost-category helpers. Every cost comparison in the app is a five-way split,
+// so plan and actual are always summed the same way.
+// ---------------------------------------------------------------------------
+type Cost = { bunker: number; freight: number; portDA: number; demurrage: number; changeover: number };
+const COST_KEYS = ['bunker', 'freight', 'portDA', 'demurrage', 'changeover'] as const;
+const COST_LABELS: Record<string, string> = {
+  bunker: 'Bunker fuel', freight: 'Freight / hire', portDA: 'Port DA', demurrage: 'Demurrage', changeover: 'Tank changeover',
+};
+const ZERO_COST = (): Cost => ({ bunker: 0, freight: 0, portDA: 0, demurrage: 0, changeover: 0 });
+const addCost = (a: Cost, b: Partial<Cost> | null | undefined): Cost => {
+  const out = { ...a };
+  for (const k of COST_KEYS) out[k] += Number(b?.[k] ?? 0);
+  return out;
+};
+const sumCost = (c: Cost) => COST_KEYS.reduce((s, k) => s + c[k], 0);
 
 // ---------------------------------------------------------------------------
 // Persist a solve result as a new (Active) schedule version, superseding prior.
@@ -51,14 +103,26 @@ async function persistVersion(stream: string, result: SolveResult, trigger: stri
   if (status === 'Active') await db.update(schema.scheduleVersions).set({ status: 'Superseded' })
     .where(and(eq(schema.scheduleVersions.stream, stream), eq(schema.scheduleVersions.status, 'Active')));
 
+  const period = await currentPeriod(stream);
   const id = randomUUID();
   await db.insert(schema.scheduleVersions).values({
     id, stream, runId: randomUUID(), version: nextVersion, parentId, trigger,
+    periodId: period?.id ?? null, isBaseline: 0,
     status, objectiveCost: result.kpis.totalCost, achievable: result.achievable ? 1 : 0,
     kpi: result.kpis as any, projection: result.projection as any, duals: result.duals as any,
     payload: { voyages: result.voyages, charterRecommendations: result.charterRecommendations, unserved: result.unserved, validation: result.validation, message: result.message } as any,
     createdAt: new Date().toISOString(),
   });
+
+  // The first published plan for a period becomes its baseline automatically —
+  // otherwise there is nothing to measure the month against. Re-assignable later.
+  if (status === 'Active' && period) {
+    const inPeriod = await db.select().from(schema.scheduleVersions)
+      .where(and(eq(schema.scheduleVersions.stream, stream), eq(schema.scheduleVersions.periodId, period.id)));
+    if (!inPeriod.some(v => v.isBaseline === 1)) {
+      await db.update(schema.scheduleVersions).set({ isBaseline: 1 }).where(eq(schema.scheduleVersions.id, id));
+    }
+  }
 
   // Normalized voyage tables (browsable/queryable). Logical voyage ids repeat
   // across re-runs of a stream, so remap to per-version UUIDs on insert.
@@ -110,9 +174,12 @@ app.get('/api/dashboard', async (req, res) => {
 
     const versions = await db.select().from(schema.scheduleVersions).where(eq(schema.scheduleVersions.stream, stream));
     const payload: any = active?.payload ?? null;
+    const periods = (await db.select().from(schema.planPeriods).where(eq(schema.planPeriods.stream, stream)))
+      .sort((a, b) => b.code.localeCompare(a.code));
+    const period = await currentPeriod(stream);
 
     res.json({
-      stream,
+      stream, period, periods,
       vessels: input.vessels, tanks: input.tanks, locations: input.locations, products: input.products,
       planLines: input.planLines, berths: input.berths, nodeFlows: input.nodeFlows, compatibility: input.compatibility,
       projection: active?.projection ?? baseline,
@@ -123,7 +190,7 @@ app.get('/api/dashboard', async (req, res) => {
       kpis: active?.kpi ?? baselineKpis(baseline),
       validation: payload?.validation ?? null,
       activeVersionId: active?.id ?? null,
-      versions: versions.map(v => ({ id: v.id, version: v.version, status: v.status, trigger: v.trigger, objectiveCost: v.objectiveCost, achievable: v.achievable, createdAt: v.createdAt })).sort((a, b) => b.version - a.version),
+      versions: versions.map(v => ({ id: v.id, version: v.version, status: v.status, trigger: v.trigger, objectiveCost: v.objectiveCost, achievable: v.achievable, createdAt: v.createdAt, periodId: v.periodId, isBaseline: v.isBaseline, kpi: v.kpi })).sort((a, b) => b.version - a.version),
     });
   } catch (e) { console.error(e); res.status(500).json({ error: 'dashboard failed', message: (e as Error).message }); }
 });
@@ -134,6 +201,7 @@ function baselineKpis(projection: any[]) {
     dryOutDays: projection.filter(p => p.firstDryOutDay !== null).length,
     tankTopDays: projection.filter(p => p.firstTankTopDay !== null).length,
     voyageCount: 0, charterRecommendationCount: 0, demandServedPct: 0,
+    costBreakdown: ZERO_COST(), liftedMt: 0,
   };
 }
 
@@ -324,25 +392,432 @@ app.post('/api/replan', async (req, res) => {
 
 app.get('/api/versions', async (req, res) => {
   const stream = (req.query.stream as string) || 'POL';
-  const rows = await db.select().from(schema.scheduleVersions).where(eq(schema.scheduleVersions.stream, stream));
-  res.json(rows.map(v => ({ id: v.id, version: v.version, status: v.status, trigger: v.trigger, objectiveCost: v.objectiveCost, achievable: v.achievable, createdAt: v.createdAt, kpi: v.kpi })).sort((a, b) => b.version - a.version));
+  const periodId = req.query.periodId as string | undefined;
+  let rows = await db.select().from(schema.scheduleVersions).where(eq(schema.scheduleVersions.stream, stream));
+  if (periodId) rows = rows.filter(v => v.periodId === periodId);
+  res.json(rows.map(v => ({ id: v.id, version: v.version, status: v.status, trigger: v.trigger, objectiveCost: v.objectiveCost, achievable: v.achievable, createdAt: v.createdAt, periodId: v.periodId, isBaseline: v.isBaseline, kpi: v.kpi })).sort((a, b) => b.version - a.version));
 });
 
 app.get('/api/versions/compare', async (req, res) => {
   const a = await db.select().from(schema.scheduleVersions).where(eq(schema.scheduleVersions.id, req.query.a as string));
   const b = await db.select().from(schema.scheduleVersions).where(eq(schema.scheduleVersions.id, req.query.b as string));
   if (!a[0] || !b[0]) return res.status(404).json({ error: 'version not found' });
-  const ka: any = a[0].kpi, kb: any = b[0].kpi;
+  if (a[0].stream !== b[0].stream) return res.status(400).json({ error: 'cannot compare versions from different streams' });
+  const ka: any = a[0].kpi ?? {}, kb: any = b[0].kpi ?? {};
+  const n = (x: any) => Number(x ?? 0);
+  const ca = addCost(ZERO_COST(), ka.costBreakdown), cb = addCost(ZERO_COST(), kb.costBreakdown);
   res.json({
-    a: { version: a[0].version, kpi: ka }, b: { version: b[0].version, kpi: kb },
-    delta: { costDelta: kb.totalCost - ka.totalCost, voyageDelta: kb.voyageCount - ka.voyageCount, servedDelta: kb.demandServedPct - ka.demandServedPct, charterDelta: kb.charterRecommendationCount - ka.charterRecommendationCount },
+    a: { version: a[0].version, kpi: ka, isBaseline: a[0].isBaseline }, b: { version: b[0].version, kpi: kb, isBaseline: b[0].isBaseline },
+    delta: {
+      costDelta: n(kb.totalCost) - n(ka.totalCost),
+      voyageDelta: n(kb.voyageCount) - n(ka.voyageCount),
+      servedDelta: n(kb.demandServedPct) - n(ka.demandServedPct),
+      charterDelta: n(kb.charterRecommendationCount) - n(ka.charterRecommendationCount),
+      byCategory: COST_KEYS.map(k => ({ key: k, label: COST_LABELS[k], a: ca[k], b: cb[k], delta: cb[k] - ca[k] })),
+    },
   });
+});
+
+// Designate a version as its period's baseline — the frozen plan the month is measured against.
+app.post('/api/versions/:id/baseline', async (req, res) => {
+  try {
+    const rows = await db.select().from(schema.scheduleVersions).where(eq(schema.scheduleVersions.id, req.params.id));
+    const v = rows[0];
+    if (!v) return res.status(404).json({ error: 'not found' });
+    if (!v.periodId) return res.status(400).json({ error: 'version is not assigned to a planning period' });
+    await db.update(schema.scheduleVersions).set({ isBaseline: 0 })
+      .where(and(eq(schema.scheduleVersions.stream, v.stream), eq(schema.scheduleVersions.periodId, v.periodId)));
+    await db.update(schema.scheduleVersions).set({ isBaseline: 1 }).where(eq(schema.scheduleVersions.id, v.id));
+    res.json({ ok: true, periodId: v.periodId, version: v.version });
+  } catch (e) { console.error(e); res.status(500).json({ error: 'set baseline failed', message: (e as Error).message }); }
 });
 
 app.get('/api/versions/:id', async (req, res) => {
   const rows = await db.select().from(schema.scheduleVersions).where(eq(schema.scheduleVersions.id, req.params.id));
   if (!rows[0]) return res.status(404).json({ error: 'not found' });
   res.json(rows[0]);
+});
+
+// ---------------------------------------------------------------------------
+// Planning periods
+// ---------------------------------------------------------------------------
+
+app.get('/api/periods', async (req, res) => {
+  const stream = (req.query.stream as string) || 'POL';
+  const rows = await db.select().from(schema.planPeriods).where(eq(schema.planPeriods.stream, stream));
+  const versions = await db.select().from(schema.scheduleVersions).where(eq(schema.scheduleVersions.stream, stream));
+  const acts = await db.select().from(schema.actuals).where(eq(schema.actuals.stream, stream));
+  res.json(rows.sort((a, b) => b.code.localeCompare(a.code)).map(p => ({
+    ...p,
+    versionCount: versions.filter(v => v.periodId === p.id).length,
+    baselineVersion: versions.find(v => v.periodId === p.id && v.isBaseline === 1)?.version ?? null,
+    actualCount: acts.filter(a => a.periodId === p.id).length,
+  })));
+});
+
+app.post('/api/periods', async (req, res) => {
+  try {
+    const { stream, code, label, startDate, endDate, horizonDays, status, copyPlanLinesFrom } = req.body ?? {};
+    if (!stream || !code || !startDate || !endDate) return res.status(400).json({ error: 'stream, code, startDate and endDate are required' });
+    const dup = await db.select().from(schema.planPeriods).where(and(eq(schema.planPeriods.stream, stream), eq(schema.planPeriods.code, code)));
+    if (dup[0]) return res.status(400).json({ error: `period ${code} already exists for ${stream}` });
+    const days = Number(horizonDays) || Math.max(1, Math.round((Date.parse(endDate) - Date.parse(startDate)) / 86400000) + 1);
+    const row = {
+      id: randomUUID(), stream, code, label: label || code, startDate, endDate,
+      horizonDays: days, status: status || 'Open', createdAt: new Date().toISOString(),
+    };
+    await db.insert(schema.planPeriods).values(row);
+    // Rolling a month forward: carry the previous month's plan lines over as a starting point.
+    let copied = 0;
+    if (copyPlanLinesFrom) {
+      const src = await db.select().from(schema.planLines).where(eq(schema.planLines.stream, stream));
+      const rows = src.filter(l => l.periodId === copyPlanLinesFrom)
+        .map(l => ({ ...l, id: randomUUID(), periodId: row.id, windowStart: startDate, windowEnd: endDate }));
+      if (rows.length) await db.insert(schema.planLines).values(rows);
+      copied = rows.length;
+    }
+    res.json({ ...row, planLinesCopied: copied });
+  } catch (e) { console.error(e); res.status(500).json({ error: 'create period failed', message: (e as Error).message }); }
+});
+
+app.put('/api/periods/:id', async (req, res) => {
+  try { await db.update(schema.planPeriods).set(req.body).where(eq(schema.planPeriods.id, req.params.id)); res.json({ ok: true }); }
+  catch (e) { console.error(e); res.status(500).json({ error: 'update period failed', message: (e as Error).message }); }
+});
+
+/** Settle a month: no further planning against it, but its versions and actuals remain. */
+app.post('/api/periods/:id/close', async (req, res) => {
+  const p = await periodById(req.params.id);
+  if (!p) return res.status(404).json({ error: 'not found' });
+  await db.update(schema.planPeriods).set({ status: 'Closed' }).where(eq(schema.planPeriods.id, p.id));
+  res.json({ ok: true });
+});
+
+/** Make this the live planning month; every other period for the stream is closed. */
+app.post('/api/periods/:id/open', async (req, res) => {
+  const p = await periodById(req.params.id);
+  if (!p) return res.status(404).json({ error: 'not found' });
+  await db.update(schema.planPeriods).set({ status: 'Closed' }).where(eq(schema.planPeriods.stream, p.stream));
+  await db.update(schema.planPeriods).set({ status: 'Open' }).where(eq(schema.planPeriods.id, p.id));
+  res.json({ ok: true });
+});
+
+app.delete('/api/periods/:id', async (req, res) => {
+  const p = await periodById(req.params.id);
+  if (!p) return res.status(404).json({ error: 'not found' });
+  const vs = await db.select().from(schema.scheduleVersions).where(eq(schema.scheduleVersions.periodId, p.id));
+  if (vs.length) return res.status(400).json({ error: `period has ${vs.length} plan version(s) — delete those first` });
+  await db.delete(schema.actuals).where(eq(schema.actuals.periodId, p.id));
+  await db.delete(schema.planLines).where(eq(schema.planLines.periodId, p.id));
+  await db.delete(schema.planPeriods).where(eq(schema.planPeriods.id, p.id));
+  res.json({ ok: true });
+});
+
+// ---------------------------------------------------------------------------
+// Actuals — what really happened, and what it really cost
+// ---------------------------------------------------------------------------
+
+app.get('/api/actuals', async (req, res) => {
+  const stream = (req.query.stream as string) || 'POL';
+  const period = await resolvePeriod(stream, req.query.periodId as string | undefined);
+  const rows = await db.select().from(schema.actuals).where(eq(schema.actuals.stream, stream));
+  res.json(rows.filter(a => !period || a.periodId === period.id).sort((a, b) => a.startDay - b.startDay));
+});
+
+const normaliseActual = (stream: string, periodId: string, r: any) => {
+  const cb = r.costBreakdown ? addCost(ZERO_COST(), r.costBreakdown) : null;
+  return {
+    id: r.id ?? randomUUID(), stream, periodId,
+    versionId: r.versionId ?? null, planVoyageId: r.planVoyageId ?? null,
+    vesselName: String(r.vesselName ?? 'Unknown'), vesselClass: String(r.vesselClass ?? ''), pool: String(r.pool ?? 'OWNED'),
+    fromLocationId: r.fromLocationId ?? null, toLocationId: r.toLocationId ?? null, productId: r.productId ?? null,
+    qtyMt: Number(r.qtyMt ?? 0), startDay: Number(r.startDay ?? 0), endDay: Number(r.endDay ?? 0),
+    // If a breakdown is given, it is authoritative and cost is its sum.
+    cost: cb ? Math.round(sumCost(cb)) : Number(r.cost ?? 0),
+    costBreakdown: cb as any,
+    status: String(r.status ?? 'COMPLETED'), source: String(r.source ?? 'MANUAL'),
+    note: r.note ?? null, createdAt: new Date().toISOString(),
+  };
+};
+
+app.post('/api/actuals', async (req, res) => {
+  try {
+    const stream = (req.query.stream as string) || req.body?.stream || 'POL';
+    const period = await resolvePeriod(stream, req.body?.periodId);
+    if (!period) return res.status(400).json({ error: 'no planning period for this stream' });
+    const row = normaliseActual(stream, period.id, req.body ?? {});
+    await db.insert(schema.actuals).values(row);
+    res.json(row);
+  } catch (e) { console.error(e); res.status(500).json({ error: 'create actual failed', message: (e as Error).message }); }
+});
+
+app.put('/api/actuals/:id', async (req, res) => {
+  try {
+    const patch: any = { ...req.body };
+    if (patch.costBreakdown) { const cb = addCost(ZERO_COST(), patch.costBreakdown); patch.costBreakdown = cb; patch.cost = Math.round(sumCost(cb)); }
+    delete patch.id; delete patch.createdAt;
+    await db.update(schema.actuals).set(patch).where(eq(schema.actuals.id, req.params.id));
+    res.json({ ok: true });
+  } catch (e) { console.error(e); res.status(500).json({ error: 'update actual failed', message: (e as Error).message }); }
+});
+
+app.delete('/api/actuals/:id', async (req, res) => {
+  await db.delete(schema.actuals).where(eq(schema.actuals.id, req.params.id)); res.json({ ok: true });
+});
+
+/** Bulk ingest (CSV/ERP extract). `replace` clears the period's existing rows first. */
+app.post('/api/actuals/bulk', async (req, res) => {
+  try {
+    const stream = (req.query.stream as string) || req.body?.stream || 'POL';
+    const period = await resolvePeriod(stream, req.body?.periodId);
+    if (!period) return res.status(400).json({ error: 'no planning period for this stream' });
+    if (req.body?.replace) await db.delete(schema.actuals).where(and(eq(schema.actuals.stream, stream), eq(schema.actuals.periodId, period.id)));
+    const rows = (req.body?.rows ?? []).map((r: any) => normaliseActual(stream, period.id, { source: 'UPLOAD', ...r }));
+    if (rows.length) await db.insert(schema.actuals).values(rows);
+    res.json({ ok: true, inserted: rows.length, periodId: period.id });
+  } catch (e) { console.error(e); res.status(500).json({ error: 'bulk actuals import failed', message: (e as Error).message }); }
+});
+
+app.delete('/api/actuals', async (req, res) => {
+  const stream = (req.query.stream as string) || 'POL';
+  const period = await resolvePeriod(stream, req.query.periodId as string | undefined);
+  if (!period) return res.status(400).json({ error: 'no planning period' });
+  await db.delete(schema.actuals).where(and(eq(schema.actuals.stream, stream), eq(schema.actuals.periodId, period.id)));
+  res.json({ ok: true });
+});
+
+/** Deterministic PRNG so a simulated month is reproducible from its seed. */
+function mulberry32(seed: number) {
+  return () => { seed |= 0; seed = (seed + 0x6D2B79F5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+}
+
+/**
+ * Stand in for an ops feed: execute a plan version on paper with realistic
+ * slippage — bunker moves with fuel price, port days run long, a few voyages
+ * are cancelled, occasionally an unplanned spot lift covers the gap.
+ */
+app.post('/api/actuals/simulate', async (req, res) => {
+  try {
+    const stream = (req.query.stream as string) || 'POL';
+    const period = await resolvePeriod(stream, req.body?.periodId);
+    if (!period) return res.status(400).json({ error: 'no planning period for this stream' });
+
+    const versions = await db.select().from(schema.scheduleVersions).where(eq(schema.scheduleVersions.stream, stream));
+    const inPeriod = versions.filter(v => v.periodId === period.id && v.status !== 'Draft');
+    const src = req.body?.versionId ? versions.find(v => v.id === req.body.versionId)
+      : (inPeriod.find(v => v.status === 'Active') ?? inPeriod.find(v => v.isBaseline === 1) ?? inPeriod.sort((a, b) => b.version - a.version)[0]);
+    if (!src) return res.status(400).json({ error: 'no plan version to execute for this period — run the optimiser first' });
+
+    const voyages: any[] = (src.payload as any)?.voyages ?? [];
+    if (!voyages.length) return res.status(400).json({ error: 'that plan version has no voyages' });
+
+    const rnd = mulberry32(Number(req.body?.seed ?? 20260701));
+    const bias = Number(req.body?.costBias ?? 0.04);   // systemic overrun, e.g. bunker up 4%
+    const spread = Number(req.body?.spread ?? 0.12);   // per-voyage noise
+    const cancelRate = Number(req.body?.cancelRate ?? 0.05);
+    const jitter = () => 1 + bias + (rnd() * 2 - 1) * spread;
+
+    await db.delete(schema.actuals).where(and(eq(schema.actuals.stream, stream), eq(schema.actuals.periodId, period.id)));
+
+    const rows: any[] = [];
+    for (const v of voyages) {
+      const cancelled = rnd() < cancelRate;
+      const disch = v.stops.flatMap((s: any) => s.ops.filter((o: any) => o.op === 'DISCHARGE'));
+      const qty = disch.reduce((a: number, o: any) => a + o.qty, 0);
+      const partial = !cancelled && rnd() < 0.10;
+      const qtyFactor = cancelled ? 0 : partial ? 0.6 + rnd() * 0.3 : 1;
+      const base = addCost(ZERO_COST(), v.costBreakdown);
+      const cb = cancelled
+        // A cancelled voyage still burns positioning fuel and port charges.
+        ? { bunker: Math.round(base.bunker * 0.25), freight: 0, portDA: Math.round(base.portDA * 0.5), demurrage: 0, changeover: 0 }
+        : {
+            bunker: Math.round(base.bunker * jitter()),
+            freight: Math.round(base.freight * (v.pool === 'SPOT' ? jitter() * 1.06 : jitter())),
+            portDA: Math.round(base.portDA * (1 + rnd() * 0.08)),
+            // Demurrage is the tail risk: usually near plan, occasionally far above it.
+            demurrage: Math.round(base.demurrage * (rnd() < 0.18 ? 1.8 + rnd() * 2.2 : 0.6 + rnd() * 0.7)),
+            changeover: Math.round(base.changeover * (1 + rnd() * 0.15)),
+          };
+      const slip = Math.round((rnd() * 2 - 0.6) * 2);
+      rows.push(normaliseActual(stream, period.id, {
+        versionId: src.id, planVoyageId: v.id, vesselName: v.vesselName, vesselClass: v.vesselClass, pool: v.pool,
+        fromLocationId: v.stops.find((s: any) => s.kind !== 'DISCHARGE')?.locationId ?? v.stops[0]?.locationId ?? null,
+        toLocationId: [...v.stops].reverse().find((s: any) => s.kind !== 'LOAD')?.locationId ?? null,
+        productId: disch[0]?.productId ?? null,
+        qtyMt: Math.round(qty * qtyFactor), startDay: v.startDay, endDay: Math.max(v.startDay, v.endDay + slip),
+        costBreakdown: cb, status: cancelled ? 'CANCELLED' : partial ? 'PARTIAL' : 'COMPLETED',
+        source: 'SIMULATED', note: cancelled ? 'Voyage cancelled in execution' : partial ? 'Part cargo lifted' : null,
+      }));
+    }
+
+    // Cover cancellations with an unplanned spot lift — the classic in-month cost surprise.
+    const cancelledRows = rows.filter(r => r.status === 'CANCELLED');
+    for (const c of cancelledRows) {
+      if (rnd() > 0.65) continue;
+      const plan = voyages.find((v: any) => v.id === c.planVoyageId);
+      const planCost = plan ? sumCost(addCost(ZERO_COST(), plan.costBreakdown)) : c.cost * 4;
+      const freight = Math.round(planCost * (1.15 + rnd() * 0.35));
+      rows.push(normaliseActual(stream, period.id, {
+        versionId: src.id, planVoyageId: null, vesselName: `Spot charter ${String(rows.length + 1).padStart(2, '0')}`,
+        vesselClass: c.vesselClass, pool: 'SPOT', fromLocationId: c.fromLocationId, toLocationId: c.toLocationId,
+        productId: c.productId, qtyMt: Math.round((plan?.stops ?? []).flatMap((s: any) => s.ops.filter((o: any) => o.op === 'DISCHARGE')).reduce((a: number, o: any) => a + o.qty, 0)),
+        startDay: c.startDay + 2, endDay: c.endDay + 3,
+        costBreakdown: { bunker: 0, freight, portDA: Math.round(freight * 0.05), demurrage: Math.round(freight * 0.03 * rnd()), changeover: 0 },
+        status: 'COMPLETED', source: 'SIMULATED', note: 'Unplanned spot fixture covering a cancelled voyage',
+      }));
+    }
+
+    if (rows.length) await db.insert(schema.actuals).values(rows);
+    res.json({ ok: true, inserted: rows.length, periodId: period.id, versionId: src.id, version: src.version });
+  } catch (e) { console.error(e); res.status(500).json({ error: 'simulate actuals failed', message: (e as Error).message }); }
+});
+
+// ---------------------------------------------------------------------------
+// Performance — baseline vs plan vs actual
+// ---------------------------------------------------------------------------
+
+/** Discharged MT on a planned voyage. */
+const voyageMt = (v: any) => (v?.stops ?? []).reduce((a: number, s: any) =>
+  a + (s.ops ?? []).reduce((x: number, o: any) => x + (o.op === 'DISCHARGE' ? o.qty : 0), 0), 0);
+
+/** Roll a period's actual rows into the same shape as a plan KPI. */
+function rollupActuals(rows: any[]) {
+  const live = rows.filter(r => r.status !== 'CANCELLED');
+  let cost = ZERO_COST();
+  for (const r of rows) cost = addCost(cost, r.costBreakdown ?? { freight: r.cost });
+  return {
+    totalCost: Math.round(rows.reduce((s, r) => s + r.cost, 0)),
+    costBreakdown: cost,
+    liftedMt: Math.round(live.reduce((s, r) => s + r.qtyMt, 0)),
+    voyageCount: live.length,
+    spotVoyageCount: live.filter(r => r.pool === 'SPOT').length,
+    cancelledCount: rows.filter(r => r.status === 'CANCELLED').length,
+    unplannedCount: rows.filter(r => !r.planVoyageId && r.status !== 'CANCELLED').length,
+    recordCount: rows.length,
+  };
+}
+
+/** Pick the two reference plans for a period: its frozen baseline and its live plan. */
+function periodRefs(versions: any[], periodId: string) {
+  const inPeriod = versions.filter(v => v.periodId === periodId && v.status !== 'Draft');
+  const byVersion = [...inPeriod].sort((a, b) => a.version - b.version);
+  const baseline = byVersion.find(v => v.isBaseline === 1) ?? byVersion[0] ?? null;
+  const current = inPeriod.find(v => v.status === 'Active') ?? byVersion[byVersion.length - 1] ?? null;
+  const ref = (v: any) => v ? { versionId: v.id, version: v.version, status: v.status, trigger: v.trigger, kpi: v.kpi ?? null } : null;
+  return { baseline: ref(baseline), current: ref(current), baselineRow: baseline, currentRow: current, count: inPeriod.length };
+}
+
+app.get('/api/performance', async (req, res) => {
+  try {
+    const stream = (req.query.stream as string) || 'POL';
+    const period = await resolvePeriod(stream, req.query.periodId as string | undefined);
+    if (!period) return res.json({ period: null, baseline: null, current: null, actual: rollupActuals([]), lines: [], voyageMatches: [] });
+
+    const versions = await db.select().from(schema.scheduleVersions).where(eq(schema.scheduleVersions.stream, stream));
+    const { baseline, current, currentRow } = periodRefs(versions, period.id);
+    const actRows = (await db.select().from(schema.actuals).where(eq(schema.actuals.stream, stream)))
+      .filter(a => a.periodId === period.id);
+    const actual = rollupActuals(actRows);
+
+    const bCost = addCost(ZERO_COST(), (baseline?.kpi as any)?.costBreakdown);
+    const pCost = addCost(ZERO_COST(), (current?.kpi as any)?.costBreakdown);
+    const hasActuals = actRows.length > 0;
+
+    const line = (key: string, label: string, b: number, p: number, a: number) => ({
+      key, label, baseline: Math.round(b), plan: Math.round(p), actual: Math.round(a),
+      varVsBaseline: Math.round(a - b), varVsPlan: Math.round(a - p),
+      varPctVsBaseline: b > 0 ? Math.round(((a - b) / b) * 1000) / 10 : null,
+    });
+    const lines = [
+      ...COST_KEYS.map(k => line(k, COST_LABELS[k], bCost[k], pCost[k], actual.costBreakdown[k])),
+      line('total', 'Total cost', Number((baseline?.kpi as any)?.totalCost ?? sumCost(bCost)), Number((current?.kpi as any)?.totalCost ?? sumCost(pCost)), actual.totalCost),
+    ];
+
+    // Voyage-level reconciliation: matched, unplanned, and planned-but-not-executed.
+    const planVoyages: any[] = (currentRow?.payload as any)?.voyages ?? [];
+    const planById = new Map(planVoyages.map(v => [v.id, v]));
+    const seen = new Set<string>();
+    const voyageMatches: any[] = [];
+    for (const a of actRows) {
+      const pv = a.planVoyageId ? planById.get(a.planVoyageId) : null;
+      if (a.planVoyageId) seen.add(a.planVoyageId);
+      voyageMatches.push({
+        planVoyageId: a.planVoyageId, vesselName: a.vesselName, pool: a.pool,
+        planCost: pv ? Math.round(pv.cost) : null, actualCost: Math.round(a.cost),
+        variance: pv ? Math.round(a.cost - pv.cost) : null,
+        planQtyMt: pv ? Math.round(voyageMt(pv)) : null, actualQtyMt: Math.round(a.qtyMt),
+        state: pv ? 'matched' : 'unplanned', status: a.status,
+      });
+    }
+    for (const v of planVoyages) {
+      if (seen.has(v.id)) continue;
+      voyageMatches.push({
+        planVoyageId: v.id, vesselName: v.vesselName, pool: v.pool,
+        planCost: Math.round(v.cost), actualCost: hasActuals ? 0 : null,
+        variance: hasActuals ? -Math.round(v.cost) : null,
+        planQtyMt: Math.round(voyageMt(v)), actualQtyMt: hasActuals ? 0 : null,
+        state: 'not-executed', status: null,
+      });
+    }
+    voyageMatches.sort((a, b) => Math.abs(b.variance ?? 0) - Math.abs(a.variance ?? 0));
+
+    const baselineMt = Number((baseline?.kpi as any)?.liftedMt ?? 0);
+    const planMt = Number((current?.kpi as any)?.liftedMt ?? 0);
+    const unit = (cost: number, mt: number) => mt > 0 ? Math.round((cost / mt) * 10) / 10 : null;
+
+    res.json({
+      period, baseline, current, actual: {
+        ...actual,
+        // How much of the live plan actually has execution data behind it.
+        coveragePct: planVoyages.length ? Math.round((seen.size / planVoyages.length) * 100) : (hasActuals ? 100 : 0),
+      },
+      lines,
+      volume: { baselineMt, planMt, actualMt: actual.liftedMt, varVsPlanMt: actual.liftedMt - planMt },
+      unitCost: {
+        baseline: unit(Number((baseline?.kpi as any)?.totalCost ?? 0), baselineMt),
+        plan: unit(Number((current?.kpi as any)?.totalCost ?? 0), planMt),
+        actual: hasActuals ? unit(actual.totalCost, actual.liftedMt) : null,
+      },
+      service: {
+        baselineServedPct: (baseline?.kpi as any)?.demandServedPct ?? null,
+        planServedPct: (current?.kpi as any)?.demandServedPct ?? null,
+        deliveredPct: planMt > 0 && hasActuals ? Math.round((actual.liftedMt / planMt) * 100) : null,
+      },
+      voyageMatches,
+    });
+  } catch (e) { console.error(e); res.status(500).json({ error: 'performance failed', message: (e as Error).message }); }
+});
+
+/** Cost history across every period for the stream — the plan-vs-actual trend. */
+app.get('/api/performance/trend', async (req, res) => {
+  try {
+    const stream = (req.query.stream as string) || 'POL';
+    const periods = await db.select().from(schema.planPeriods).where(eq(schema.planPeriods.stream, stream));
+    const versions = await db.select().from(schema.scheduleVersions).where(eq(schema.scheduleVersions.stream, stream));
+    const acts = await db.select().from(schema.actuals).where(eq(schema.actuals.stream, stream));
+
+    const points = periods.sort((a, b) => a.code.localeCompare(b.code)).map(p => {
+      const { baseline, current, count } = periodRefs(versions, p.id);
+      const rows = acts.filter(a => a.periodId === p.id);
+      const roll = rollupActuals(rows);
+      const bMt = Number((baseline?.kpi as any)?.liftedMt ?? 0) || null;
+      const pMt = Number((current?.kpi as any)?.liftedMt ?? 0) || null;
+      const unit = (c: number | null, mt: number | null) => c != null && mt ? Math.round((c / mt) * 10) / 10 : null;
+      const planCost = current?.kpi ? Number((current.kpi as any).totalCost) : null;
+      return {
+        periodId: p.id, code: p.code, label: p.label, status: p.status,
+        baselineCost: baseline?.kpi ? Number((baseline.kpi as any).totalCost) : null,
+        planCost,
+        actualCost: rows.length ? roll.totalCost : null,
+        baselineMt: bMt, planMt: pMt, actualMt: rows.length ? roll.liftedMt : null,
+        actualUnitCost: rows.length ? unit(roll.totalCost, roll.liftedMt || null) : null,
+        planUnitCost: unit(planCost, pMt),
+        servedPct: (current?.kpi as any)?.demandServedPct ?? null,
+        versionCount: count, hasActuals: rows.length > 0,
+      };
+    });
+    res.json({ stream, points });
+  } catch (e) { console.error(e); res.status(500).json({ error: 'trend failed', message: (e as Error).message }); }
 });
 
 // Generic master-data CRUD for the editable tables.
@@ -379,7 +854,7 @@ app.post('/api/master/:table/bulk', async (req, res) => {
 // Reset all data back to the seeded demo network.
 app.post('/api/admin/reseed', async (_req, res) => {
   try {
-    const tables = [schema.charterRecommendations, schema.voyageOps, schema.voyageStops, schema.voyages, schema.scheduleVersions, schema.planLines, schema.nodeFlows, schema.berths, schema.productCompatibility, schema.tanks, schema.vessels, schema.locations, schema.products];
+    const tables = [schema.charterRecommendations, schema.voyageOps, schema.voyageStops, schema.voyages, schema.actuals, schema.scheduleVersions, schema.planPeriods, schema.planLines, schema.nodeFlows, schema.berths, schema.productCompatibility, schema.tanks, schema.vessels, schema.locations, schema.products];
     for (const t of tables) await db.delete(t);
     await seed(db);
     res.json({ ok: true });

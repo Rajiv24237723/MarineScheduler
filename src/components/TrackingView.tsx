@@ -1,4 +1,4 @@
-﻿import { DashboardData, Voyage, Goto } from '../types';
+﻿import { DashboardData, Voyage, Goto, horizonStartDate } from '../types';
 import { Card, CardContent } from '@/components/ui/card';
 import { Modal } from '@/components/ui/modal';
 import { VoyageDetail } from './VoyageDetail';
@@ -16,7 +16,7 @@ function FitBounds({ points }: { points: [number, number][] }) {
   return null;
 }
 
-const START = new Date('2026-07-01T00:00:00Z');
+const START = () => horizonStartDate();
 const portIcon = new L.DivIcon({ html: `<div style="width:12px;height:12px;background:#6366f1;border:2px solid #0b1220;border-radius:9999px"></div>`, className: '', iconSize: [12, 12], iconAnchor: [6, 6] });
 const vesselIcon = new L.DivIcon({ html: `<div style="color:#f59e0b;background:rgba(11,18,32,.85);border-radius:9999px;padding:3px;border:1px solid rgba(245,158,11,.5)"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="3 11 22 2 13 21 11 13 3 11"/></svg></div>`, className: '', iconSize: [20, 20], iconAnchor: [10, 10] });
 
@@ -53,7 +53,7 @@ export default function TrackingView({ data, goto }: { data: DashboardData; goto
       <div className="flex items-center justify-between">
         <h3 className="text-lg font-semibold text-foreground">Live Fleet — voyage playback</h3>
         <div className="flex items-center gap-3">
-          <span className="text-[11px] text-muted-foreground">As of {format(addDays(START, asOf), 'MMM d')}</span>
+          <span className="text-[11px] text-muted-foreground">As of {format(addDays(START(), asOf), 'MMM d')}</span>
           <input type="range" min={0} max={maxDay} value={asOf} onChange={e => setAsOf(Number(e.target.value))} className="w-48 accent-cyan-500" />
           <span className="inline-flex items-center rounded-md bg-cyan-500/10 px-3 py-1 text-[11px] font-medium text-cyan-400 ring-1 ring-inset ring-cyan-500/30">{live.length} at sea/port</span>
         </div>

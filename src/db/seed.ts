@@ -280,12 +280,129 @@ export async function seed(db: any) {
   ];
   const productCompatibility = compat.map(([stream, from, to, allowed, hrs, cost], i) => ({ id: `pc_${i + 1}`, stream, scope: 'COMPARTMENT', fromProduct: from, toProduct: to, allowed, changeoverHours: hrs, changeoverCost: cost }));
 
+  // ---- Planning periods, and three settled months of history ---------------
+  // Jul 2026 is the live planning month and is left empty — it gets its versions
+  // from the optimiser. Apr–Jun are closed months carrying a frozen baseline, the
+  // plan as it ended the month, and an actuals ledger, so cost can be trended.
+  // Those three months are ILLUSTRATIVE (no historical ops feed exists); their
+  // magnitudes are anchored to a solved July plan per stream, so a historic month
+  // sits on the same scale as one the optimiser produces. See DATA_PROVENANCE.md.
+  const STREAMS = ['POL', 'CRUDE', 'LNG'];
+  const HIST: Record<string, { cost: number; mt: number; voyages: number; share: Record<string, number> }> = {
+    POL: { cost: 905_000_000, mt: 775_000, voyages: 18, share: { bunker: 0.115, freight: 0.503, portDA: 0.353, demurrage: 0.029, changeover: 0 } },
+    CRUDE: { cost: 718_000_000, mt: 2_060_000, voyages: 10, share: { bunker: 0.147, freight: 0.707, portDA: 0.137, demurrage: 0.009, changeover: 0 } },
+    LNG: { cost: 318_000_000, mt: 245_000, voyages: 4, share: { bunker: 0.144, freight: 0.681, portDA: 0.155, demurrage: 0.020, changeover: 0 } },
+  };
+  // Execution multipliers per category tell each month's story: April ran a firm
+  // bunker market and congested berths; May was soft; June was the bad month.
+  const MONTHS = [
+    { code: '2026-04', label: 'Apr 2026', start: '2026-04-01', end: '2026-04-30', days: 30, vol: 0.96, replan: 0.021, served: 100,
+      mult: { bunker: 1.05, freight: 1.01, portDA: 1.02, demurrage: 1.75, changeover: 1 }, cleanPct: 0.004, liftPct: 1.0 },
+    { code: '2026-05', label: 'May 2026', start: '2026-05-01', end: '2026-05-31', days: 31, vol: 1.02, replan: 0.008, served: 100,
+      mult: { bunker: 1.02, freight: 0.96, portDA: 1.01, demurrage: 0.85, changeover: 1 }, cleanPct: 0.002, liftPct: 1.01 },
+    { code: '2026-06', label: 'Jun 2026', start: '2026-06-01', end: '2026-06-30', days: 30, vol: 0.99, replan: 0.034, served: 98,
+      mult: { bunker: 1.09, freight: 1.02, portDA: 1.03, demurrage: 2.40, changeover: 1 }, cleanPct: 0.007, liftPct: 0.97 },
+  ];
+  const CATS = ['bunker', 'freight', 'portDA', 'demurrage', 'changeover'] as const;
+
+  const periods: any[] = [], histVersions: any[] = [], histActuals: any[] = [];
+  const at = new Date('2026-03-25T06:00:00Z');
+  const iso = (offsetDays: number) => new Date(at.getTime() + offsetDays * 86400000).toISOString();
+
+  let vSeq = 0, aSeq = 0;
+  for (const s of STREAMS) {
+    const h = HIST[s];
+    const split = (total: number) => Object.fromEntries(CATS.map(k => [k, Math.round(total * h.share[k])])) as Record<string, number>;
+    const kpiFor = (cost: number, mt: number, voyages: number, served: number, spot: number) => {
+      const cb = split(cost);
+      return {
+        totalCost: Math.round(cost), demurrage: cb.demurrage, utilizationPct: 78 + (voyages % 9),
+        dryOutDays: 0, tankTopDays: 0, voyageCount: voyages, charterRecommendationCount: spot,
+        demandServedPct: served, costBreakdown: cb, liftedMt: Math.round(mt),
+      };
+    };
+    const fleet = vessels.filter(v => v.stream === s && v.pool !== 'SPOT');
+    const sources = locations.filter(l => l.stream === s && ['REFINERY', 'SOURCE'].includes(l.type));
+    const sinks = locations.filter(l => l.stream === s && ['COASTAL_TERMINAL', 'CRUDE_INTAKE', 'LNG_TERMINAL'].includes(l.type));
+    let versionNo = 0;
+
+    MONTHS.forEach((m, mi) => {
+      const periodId = `pp_${s.toLowerCase()}_${m.code}`;
+      periods.push({ id: periodId, stream: s, code: m.code, label: m.label, startDate: m.start, endDate: m.end, horizonDays: m.days, status: 'Closed', createdAt: iso(mi * 30 - 6) });
+
+      const baseCost = h.cost * m.vol, baseMt = h.mt * m.vol;
+      const planCost = baseCost * (1 + m.replan);
+      const nVoy = h.voyages + mi;
+      const spot = m.replan > 0.02 ? 2 : 1;
+
+      // Actual = the final plan run through each category's execution multiplier,
+      // plus tank cleaning nobody planned for.
+      const planSplit = split(planCost);
+      const actSplit: Record<string, number> = {};
+      for (const k of CATS) actSplit[k] = Math.round(planSplit[k] * m.mult[k]);
+      actSplit.changeover += Math.round(planCost * m.cleanPct);
+      const actCost = CATS.reduce((a, k) => a + actSplit[k], 0);
+      const actMt = baseMt * m.liftPct;
+
+      const baseId = `sv_${s.toLowerCase()}_${m.code}_b`, finalId = `sv_${s.toLowerCase()}_${m.code}_f`;
+      histVersions.push({
+        id: baseId, stream: s, runId: `hist_${++vSeq}`, version: ++versionNo, periodId, isBaseline: 1, parentId: null,
+        trigger: 'baseline:start-of-month', status: 'Superseded', objectiveCost: Math.round(baseCost), achievable: 1,
+        kpi: kpiFor(baseCost, baseMt, nVoy, 100, spot - 1), projection: [], duals: [],
+        payload: { voyages: [], charterRecommendations: [], unserved: [], validation: { ok: true, breaches: [] }, message: `Seeded ${m.label} start-of-month baseline (illustrative).` },
+        createdAt: iso(mi * 30 - 5),
+      });
+      histVersions.push({
+        id: finalId, stream: s, runId: `hist_${++vSeq}`, version: ++versionNo, periodId, isBaseline: 0, parentId: baseId,
+        trigger: 'disruption:in-month replan', status: 'Superseded', objectiveCost: Math.round(planCost), achievable: m.served >= 100 ? 1 : 0,
+        kpi: kpiFor(planCost, baseMt, nVoy + spot, m.served, spot), projection: [], duals: [],
+        payload: { voyages: [], charterRecommendations: [], unserved: [], validation: { ok: true, breaches: [] }, message: `Seeded ${m.label} end-of-month plan (illustrative).` },
+        createdAt: iso(mi * 30 + 11),
+      });
+
+      // Actuals ledger: the month's cost spread over its voyages, the last one or
+      // two fixed on the spot market.
+      const rows = nVoy + spot;
+      const weights = Array.from({ length: rows }, (_, i) => 0.75 + ((i * 37) % 50) / 100);
+      const wSum = weights.reduce((a, b) => a + b, 0);
+      for (let i = 0; i < rows; i++) {
+        const isSpot = i >= rows - spot;
+        const w = weights[i] / wSum;
+        const cb = Object.fromEntries(CATS.map(k => [k, Math.round(actSplit[k] * w)])) as any;
+        if (isSpot) { cb.freight += cb.bunker; cb.bunker = 0; }  // voyage charter: bunkers are the owner's
+        const src = sources[i % Math.max(1, sources.length)], dst = sinks[(i * 3) % Math.max(1, sinks.length)];
+        const start = Math.min(m.days - 2, Math.round((i / rows) * m.days));
+        const v = fleet[i % Math.max(1, fleet.length)];
+        histActuals.push({
+          id: `ac_${++aSeq}`, stream: s, periodId, versionId: finalId, planVoyageId: null,
+          vesselName: isSpot ? `MT Spot Fixture ${m.code.slice(5)}-${i - rows + spot + 1}` : (v?.name ?? 'MT Unknown'),
+          vesselClass: v?.class ?? 'MR', pool: isSpot ? 'SPOT' : (v?.pool ?? 'OWNED'),
+          fromLocationId: src?.id ?? null, toLocationId: dst?.id ?? null, productId: null,
+          qtyMt: Math.round(actMt * w), startDay: start, endDay: Math.min(m.days, start + 5 + (i % 4)),
+          cost: CATS.reduce((a, k) => a + cb[k], 0), costBreakdown: cb,
+          status: 'COMPLETED', source: 'SEED',
+          note: isSpot ? 'Spot fixture — seeded illustrative history' : 'Seeded illustrative history',
+          createdAt: iso(mi * 30 + 12),
+        });
+      }
+    });
+
+    periods.push({ id: `pp_${s.toLowerCase()}_2026-07`, stream: s, code: '2026-07', label: 'Jul 2026', startDate: W.start, endDate: W.end, horizonDays: DAYS, status: 'Open', createdAt: iso(90) });
+  }
+
+  // The seeded monthly plan belongs to the live July period.
+  const julyPeriod = (s: string) => `pp_${s.toLowerCase()}_2026-07`;
+  for (const l of planLines) l.periodId = julyPeriod(l.stream);
+
   await db.insert(schema.products).values(products);
   await db.insert(schema.locations).values(locations);
   await db.insert(schema.vessels).values(vessels);
   await db.insert(schema.tanks).values(tanks);
   await db.insert(schema.nodeFlows).values(nodeFlows);
+  await db.insert(schema.planPeriods).values(periods);
   await db.insert(schema.planLines).values(planLines);
   await db.insert(schema.berths).values(berths);
   await db.insert(schema.productCompatibility).values(productCompatibility);
+  await db.insert(schema.scheduleVersions).values(histVersions);
+  await db.insert(schema.actuals).values(histActuals);
 }

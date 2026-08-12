@@ -1,12 +1,12 @@
 ﻿import { useState, useMemo, useEffect } from 'react';
-import { DashboardData, Tank, Goto, Focus } from '../types';
+import { DashboardData, Tank, Goto, Focus, horizonStartDate } from '../types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Modal } from '@/components/ui/modal';
 import { TankDetail } from './TankDetail';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
 import { format, addDays } from 'date-fns';
 
-const START = new Date('2026-07-01T00:00:00Z');
+const START = () => horizonStartDate();
 
 export default function InventoryView({ data, goto, focus }: { data: DashboardData; goto?: Goto; focus?: Focus }) {
   const projections = data.projection ?? [];
@@ -21,7 +21,7 @@ export default function InventoryView({ data, goto, focus }: { data: DashboardDa
   const sel = projections.find(p => `${p.locationId}|${p.productId}` === key) ?? projections[0];
 
   const chartData = useMemo(() => (sel?.series ?? []).map(s => ({
-    date: format(addDays(START, s.day), 'MMM d'), stock: s.stock,
+    date: format(addDays(START(), s.day), 'MMM d'), stock: s.stock,
   })), [sel]);
 
   if (!sel) return <div className="text-sm text-muted-foreground">No inventory nodes for this stream.</div>;

@@ -126,6 +126,10 @@ export interface Kpis {
   dryOutDays: number; tankTopDays: number;
   voyageCount: number; charterRecommendationCount: number;
   demandServedPct: number;
+  /** Plan cost attributed by category — lets variance be explained, not just measured. */
+  costBreakdown?: CostBreakdown;
+  /** Total MT discharged across the plan; the volume denominator for ₹/MT. */
+  liftedMt?: number;
   resilience?: Resilience;
 }
 

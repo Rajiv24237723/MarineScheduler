@@ -6,11 +6,35 @@ solvable. It is a high-realism demo dataset, not a historical operations ledger.
 disclosure runs out (per-lane monthly volumes, per-tank sizes, exact opening inventories), the
 numbers are calibrated estimates that preserve the public totals and the network topology.
 
-## Horizon
+## Horizon and planning periods
 
-The operating plan is a **30-day start-of-month plan** (seed day 0 = 2026-07-01). Replans and
-scenarios are rolling: they solve `[as-of day → month end]`, freezing everything committed before
-the as-of day. Only a new month starts a fresh baseline.
+Plans belong to a **planning period** (`plan_periods`) — one row per stream per month, carrying the
+start date, horizon length and Open/Closed status. Day 0 of every day index in the app is that
+period's start date; nothing in the UI hard-codes a month. The seed opens **Jul 2026** (30 days,
+day 0 = 2026-07-01) as the live period for all three streams.
+
+Replans and scenarios are rolling: they solve `[as-of day → month end]`, freezing everything
+committed before the as-of day. Each period has one **baseline** version — the frozen plan the
+month's cost is measured against. The first plan published into a period becomes its baseline
+automatically; it can be reassigned from Cost & Variance.
+
+## Seeded history — Apr, May and Jun 2026
+
+Those three months are seeded **closed** so cost can be trended before anyone has run a month for
+real. Each carries a start-of-month baseline, an end-of-month plan, and an actuals ledger.
+
+**These are illustrative, not observed.** No historical operations feed exists for this dataset;
+the months are generated from a per-stream anchor calibrated against a solved Jul-2026 plan, so a
+historic month sits on the same cost scale as one the optimiser produces. Category shares (bunker /
+freight / port DA / demurrage / changeover) are taken from that solve. Execution variance is applied
+per category to give each month a distinct story — April ran a firm bunker market and congested
+berths, May was soft, June was the bad month — rather than scaling every line by one number. Every
+seeded actual row is tagged `source: 'SEED'`.
+
+Actuals for the live month come from one of three places: a CSV import, manual entry, or
+`POST /api/actuals/simulate`, which executes a plan version on paper with per-category slippage,
+occasional cancellations and unplanned spot cover. Simulated rows are tagged `source: 'SIMULATED'`
+and are reproducible from their seed. Anything from a real ops feed should be imported as `UPLOAD`.
 
 ## Crude
 

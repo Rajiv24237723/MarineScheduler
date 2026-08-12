@@ -16,7 +16,7 @@ export interface Tank {
   capacity: number; minStock: number; currentStock: number; name: string;
 }
 export interface NodeFlow { id: string; stream: string; locationId: string; productId: string; dailyIn: number; dailyOut: number; }
-export interface PlanLine { id: string; stream: string; kind: string; productId: string; locationId: string; qty: number; windowStart: string; windowEnd: string; priority: number; }
+export interface PlanLine { id: string; stream: string; periodId?: string | null; kind: string; productId: string; locationId: string; qty: number; windowStart: string; windowEnd: string; priority: number; }
 export interface Berth { id: string; stream: string; locationId: string; name: string; nsim: number; rateMtPerHr: number; berthingHours: number; maxDraft: number; }
 export interface ProductCompat { id: string; stream: string; scope: string; fromProduct: string; toProduct: string; allowed: number; changeoverHours: number; changeoverCost: number; }
 
@@ -48,10 +48,68 @@ export interface Resilience {
 export interface Kpis {
   totalCost: number; demurrage: number; utilizationPct: number; dryOutDays: number; tankTopDays: number;
   voyageCount: number; charterRecommendationCount: number; demandServedPct: number;
+  /** Cost attributed by category, so variance can be explained not just measured. */
+  costBreakdown?: CostBreakdown;
+  /** Total MT discharged across the plan — the volume denominator for ₹/MT. */
+  liftedMt?: number;
   resilience?: Resilience;
 }
 export interface Unserved { locationId: string; productId: string; day: number; shortfallMt: number; reason: string; }
-export interface VersionSummary { id: string; version: number; status: string; trigger: string; objectiveCost: number; achievable: number; createdAt: string; }
+export interface VersionSummary {
+  id: string; version: number; status: string; trigger: string; objectiveCost: number;
+  achievable: number; createdAt: string; periodId?: string | null; isBaseline?: number; kpi?: Kpis | null;
+}
+
+// --- Periods, actuals, performance -----------------------------------------
+
+export interface PlanPeriod {
+  id: string; stream: string; code: string; label: string;
+  startDate: string; endDate: string; horizonDays: number;
+  status: 'Open' | 'Closed' | string; createdAt: string;
+}
+export interface Actual {
+  id: string; stream: string; periodId: string; versionId: string | null; planVoyageId: string | null;
+  vesselName: string; vesselClass: string; pool: string;
+  fromLocationId: string | null; toLocationId: string | null; productId: string | null;
+  qtyMt: number; startDay: number; endDay: number; cost: number;
+  costBreakdown: CostBreakdown | null;
+  status: string; source: string; note: string | null; createdAt: string;
+}
+/** One cost line compared three ways. */
+export interface VarianceLine {
+  key: string; label: string;
+  baseline: number; plan: number; actual: number;
+  varVsBaseline: number; varVsPlan: number; varPctVsBaseline: number | null;
+}
+export interface PerformanceRef { versionId: string; version: number; status: string; trigger: string; kpi: Kpis | null; }
+export interface VoyageMatch {
+  planVoyageId: string | null; vesselName: string; pool: string;
+  planCost: number | null; actualCost: number | null; variance: number | null;
+  planQtyMt: number | null; actualQtyMt: number | null;
+  state: 'matched' | 'unplanned' | 'not-executed'; status: string | null;
+}
+export interface PerformanceReport {
+  period: PlanPeriod | null;
+  baseline: PerformanceRef | null;
+  current: PerformanceRef | null;
+  actual: {
+    totalCost: number; costBreakdown: CostBreakdown; liftedMt: number;
+    voyageCount: number; spotVoyageCount: number; cancelledCount: number; unplannedCount: number;
+    recordCount: number; coveragePct: number;
+  };
+  lines: VarianceLine[];
+  volume: { baselineMt: number; planMt: number; actualMt: number; varVsPlanMt: number };
+  unitCost: { baseline: number | null; plan: number | null; actual: number | null };
+  service: { baselineServedPct: number | null; planServedPct: number | null; deliveredPct: number | null };
+  voyageMatches: VoyageMatch[];
+}
+export interface TrendPoint {
+  periodId: string; code: string; label: string; status: string;
+  baselineCost: number | null; planCost: number | null; actualCost: number | null;
+  baselineMt: number | null; planMt: number | null; actualMt: number | null;
+  actualUnitCost: number | null; planUnitCost: number | null;
+  servedPct: number | null; versionCount: number; hasActuals: boolean;
+}
 
 export interface DashboardData {
   stream: string;
@@ -66,6 +124,8 @@ export interface DashboardData {
   validation: { ok: boolean; breaches: string[] } | null;
   activeVersionId: string | null;
   versions: VersionSummary[];
+  period: PlanPeriod | null;
+  periods: PlanPeriod[];
 }
 
 /** Replan-decision thresholds (Settings-editable), passed to the scenario endpoints. */
@@ -86,5 +146,15 @@ export interface ReplanDecision {
 export type Focus = { node?: { loc: string; product: string }; tankId?: string; vesselId?: string; locationId?: string } | null;
 export type Goto = (tab: string, focus?: Focus) => void;
 
+/**
+ * Day 0 of the horizon. Day indices throughout the app are relative to the open
+ * planning period, so this follows whichever period the dashboard returns —
+ * `setHorizonStart` is called once per load in App.
+ */
 export const START_DATE = new Date('2026-07-01T00:00:00Z');
-export function dayToDate(day: number): Date { const d = new Date(START_DATE); d.setUTCDate(d.getUTCDate() + day); return d; }
+let horizonStart = new Date(START_DATE);
+export function setHorizonStart(iso: string | null | undefined) {
+  horizonStart = iso ? new Date(`${iso.slice(0, 10)}T00:00:00Z`) : new Date(START_DATE);
+}
+export function horizonStartDate(): Date { return new Date(horizonStart); }
+export function dayToDate(day: number): Date { const d = new Date(horizonStart); d.setUTCDate(d.getUTCDate() + day); return d; }

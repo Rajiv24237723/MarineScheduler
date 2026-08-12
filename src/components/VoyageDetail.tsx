@@ -1,9 +1,9 @@
 ﻿import { useState } from 'react';
-import { Voyage, Location, Product, Vessel, Focus } from '../types';
+import { Voyage, Location, Product, Vessel, Focus, horizonStartDate } from '../types';
 import { VesselStowage } from './ui/VesselStowage';
 import { format, addDays } from 'date-fns';
 
-const START = new Date('2026-07-01T00:00:00Z');
+const START = () => horizonStartDate();
 const fmtM = (n: number) => `₹${(n / 1e6).toFixed(1)}M`;
 
 /** Shared voyage-detail body: cargo stowage manifest + current on-board inventory,
@@ -18,7 +18,7 @@ export function VoyageDetail({ voyage, locations, products, vessels = [], onNavi
   for (const s of voyage.stops) for (const o of s.ops) if (o.op === 'LOAD') stow[o.compartmentId] = { productId: o.productId, qty: o.qty };
 
   // As-of scrubber: on-board inventory = loads − discharges up to the selected day.
-  const today = Math.round((Date.now() - START.getTime()) / 86400000);
+  const today = Math.round((Date.now() - START().getTime()) / 86400000);
   const clampDay = (d: number) => Math.max(voyage.startDay, Math.min(voyage.endDay, d));
   const [asOf, setAsOf] = useState(clampDay(today));
   const onboardAt = (compId: string, day: number) => {
@@ -50,7 +50,7 @@ export function VoyageDetail({ voyage, locations, products, vessels = [], onNavi
           </div>
           <VesselStowage compartments={vessel.compartments} stow={stow} products={products} current={current} />
           <div className="mt-2 flex items-center gap-2">
-            <span className="text-[10px] text-muted-foreground whitespace-nowrap">As of {format(addDays(START, asOf), 'MMM d')}</span>
+            <span className="text-[10px] text-muted-foreground whitespace-nowrap">As of {format(addDays(START(), asOf), 'MMM d')}</span>
             <input type="range" min={voyage.startDay} max={voyage.endDay} value={asOf} onChange={e => setAsOf(Number(e.target.value))} className="flex-1 accent-cyan-500" />
             <span className="text-[10px] text-muted-foreground whitespace-nowrap">{inTransit ? (asOf >= voyage.endDay ? 'voyage complete (empty)' : 'in transit') : ''}</span>
           </div>
@@ -77,7 +77,7 @@ export function VoyageDetail({ voyage, locations, products, vessels = [], onNavi
             <div key={s.seq} className="flex items-center gap-2 bg-background/50 rounded-md border border-border/60 px-3 py-1.5 text-xs">
               <span className="px-1.5 py-0.5 rounded-md text-[9px] font-medium" style={{ background: s.kind === 'LOAD' ? 'color-mix(in srgb, var(--sea-sand) 16%, transparent)' : 'color-mix(in srgb, var(--sea-green) 16%, transparent)', color: s.kind === 'LOAD' ? 'var(--sea-sand)' : 'var(--sea-green)' }}>{s.kind}</span>
               {onNavigate ? <button onClick={() => onNavigate('inventory', { locationId: s.locationId })} className="text-foreground/90 flex-1 text-left hover:text-cyan-300">{loc(s.locationId)}</button> : <span className="text-foreground/90 flex-1">{loc(s.locationId)}</span>}
-              <span className="text-muted-foreground">{format(addDays(START, s.arriveDay), 'MMM d')}</span>
+              <span className="text-muted-foreground">{format(addDays(START(), s.arriveDay), 'MMM d')}</span>
               <span className="text-foreground/70 font-mono text-[10px]">{s.ops.map(o => `${prod(o.productId)?.name} ${(o.qty / 1000).toFixed(0)}k→${o.compartmentId}`).join(' · ')}</span>
             </div>
           ))}

@@ -38,6 +38,15 @@ export async function solve(input: EngineInput, onProgress?: (e: ProgressEvent) 
   const achievable = out.unserved.length === 0;
   const totalCost = out.voyages.reduce((s, v) => s + v.cost, 0);
   const demurrage = out.voyages.reduce((s, v) => s + v.costBreakdown.demurrage, 0);
+  // Attribute plan cost by category so downstream variance can say *why* cost moved.
+  const costBreakdown = out.voyages.reduce((a, v) => ({
+    bunker: a.bunker + v.costBreakdown.bunker, freight: a.freight + v.costBreakdown.freight,
+    portDA: a.portDA + v.costBreakdown.portDA, demurrage: a.demurrage + v.costBreakdown.demurrage,
+    changeover: a.changeover + v.costBreakdown.changeover,
+  }), { bunker: 0, freight: 0, portDA: 0, demurrage: 0, changeover: 0 });
+  for (const k of Object.keys(costBreakdown) as (keyof typeof costBreakdown)[]) costBreakdown[k] = Math.round(costBreakdown[k]);
+  const liftedMt = out.voyages.reduce((s, v) =>
+    s + v.stops.reduce((a, st) => a + st.ops.reduce((x, o) => x + (o.op === 'DISCHARGE' ? o.qty : 0), 0), 0), 0);
   const ownedCount = input.vessels.filter(v => v.pool !== 'SPOT').length;
   const usedOwned = new Set(out.voyages.filter(v => v.pool !== 'SPOT').map(v => v.vesselId)).size;
   const dryOutNodes = projection.filter(p => p.firstDryOutDay !== null).length;
@@ -89,6 +98,8 @@ export async function solve(input: EngineInput, onProgress?: (e: ProgressEvent) 
     voyageCount: out.voyages.length,
     charterRecommendationCount: out.recommendations.length,
     demandServedPct,
+    costBreakdown,
+    liftedMt: Math.round(liftedMt),
     resilience: assessResilience(input, out.voyages),
   };
 

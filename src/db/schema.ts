@@ -76,6 +76,7 @@ export const nodeFlows = sqliteTable('node_flows', {
 export const planLines = sqliteTable('plan_lines', {
   id: text('id').primaryKey(),
   stream: text('stream').notNull(),
+  periodId: text('period_id'),  // planning month this line belongs to (null = unscoped/legacy)
   kind: text('kind').notNull(), // DEMAND | SUPPLY
   productId: text('product_id').notNull(),
   locationId: text('location_id').notNull(),
@@ -109,6 +110,52 @@ export const productCompatibility = sqliteTable('product_compatibility', {
 });
 
 // ---------------------------------------------------------------------------
+// Planning periods — the month a plan version belongs to. One period holds many
+// versions; exactly one of them may be flagged the baseline (the frozen
+// start-of-month plan that actual performance is measured against).
+// ---------------------------------------------------------------------------
+
+export const planPeriods = sqliteTable('plan_periods', {
+  id: text('id').primaryKey(),
+  stream: text('stream').notNull(),
+  code: text('code').notNull(),          // sortable key, e.g. '2026-07'
+  label: text('label').notNull(),        // display, e.g. 'Jul 2026'
+  startDate: text('start_date').notNull(), // ISO date — day 0 of this period's horizon
+  endDate: text('end_date').notNull(),
+  horizonDays: integer('horizon_days').notNull().default(30),
+  status: text('status').notNull().default('Open'), // Open (planning/executing) | Closed (month settled)
+  createdAt: text('created_at').notNull(),
+});
+
+/**
+ * Executed reality: what actually moved and what it actually cost. One row per
+ * executed voyage-leg. `planVoyageId` links back to the planned voyage it
+ * fulfilled — null means an unplanned lift, which is itself a variance signal.
+ */
+export const actuals = sqliteTable('actuals', {
+  id: text('id').primaryKey(),
+  stream: text('stream').notNull(),
+  periodId: text('period_id').notNull(),
+  versionId: text('version_id'),          // plan version executed against (null = unknown)
+  planVoyageId: text('plan_voyage_id'),   // matched planned voyage id (null = unplanned lift)
+  vesselName: text('vessel_name').notNull(),
+  vesselClass: text('vessel_class').notNull().default(''),
+  pool: text('pool').notNull().default('OWNED'),
+  fromLocationId: text('from_location_id'),
+  toLocationId: text('to_location_id'),
+  productId: text('product_id'),
+  qtyMt: real('qty_mt').notNull().default(0),
+  startDay: integer('start_day').notNull().default(0),  // day index from period start
+  endDay: integer('end_day').notNull().default(0),
+  cost: real('cost').notNull().default(0),
+  costBreakdown: text('cost_breakdown', { mode: 'json' }).$type<{ bunker: number; freight: number; portDA: number; demurrage: number; changeover: number }>(),
+  status: text('status').notNull().default('COMPLETED'), // COMPLETED | PARTIAL | CANCELLED
+  source: text('source').notNull().default('MANUAL'),    // MANUAL | UPLOAD | SIMULATED | SEED
+  note: text('note'),
+  createdAt: text('created_at').notNull(),
+});
+
+// ---------------------------------------------------------------------------
 // Solve outputs (persisted, versioned).
 // ---------------------------------------------------------------------------
 
@@ -117,9 +164,11 @@ export const scheduleVersions = sqliteTable('schedule_versions', {
   stream: text('stream').notNull(),
   runId: text('run_id').notNull(),
   version: integer('version').notNull(),
+  periodId: text('period_id'),          // planning month this version plans for
+  isBaseline: integer('is_baseline').notNull().default(0), // frozen benchmark for its period
   parentId: text('parent_id'),
   trigger: text('trigger').notNull(),   // initial | reoptimize | disruption:* | manual
-  status: text('status').notNull(),     // Active | Superseded
+  status: text('status').notNull(),     // Active | Draft | Superseded
   objectiveCost: real('objective_cost').notNull(),
   achievable: integer('achievable').notNull().default(1),
   kpi: text('kpi', { mode: 'json' }),
