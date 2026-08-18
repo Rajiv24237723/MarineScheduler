@@ -14,10 +14,18 @@ import { InventoryModel } from './src/lib/mirp/inventory';
 import { classifyReplan, DEFAULT_THRESHOLDS, ReplanThresholds } from './src/lib/mirp/classify';
 import { compileEvents } from './src/lib/mirp/scenario';
 import { EngineInput, EngineOptions, ScenarioEvent, SolveResult } from './src/lib/mirp/types';
+import { z } from 'zod';
+import { loadConfig, describeConfig } from './src/config';
+import {
+  parseBody, MasterSchemas, MasterTable, ActualSchema, ActualPatchSchema, ActualBulkSchema,
+  PeriodSchema, PeriodPatchSchema, ScenarioSchema, ScenarioPatchSchema,
+} from './src/lib/http/validate';
 
+// Fail fast and legibly on a bad environment rather than an hour into a session.
+const cfg = loadConfig();
 const app = express();
-app.use(express.json());
-const PORT = 3000;
+app.use(express.json({ limit: '8mb' }));
+const PORT = cfg.PORT;
 const HORIZON_DAYS = 30;          // fallback when no planning period exists
 const START_DATE = '2026-07-01';
 
@@ -500,15 +508,14 @@ app.get('/api/scenarios', async (req, res) => {
 app.post('/api/scenarios', async (req, res) => {
   try {
     const stream = (req.query.stream as string) || req.body?.stream || 'POL';
-    const name = (req.body?.name as string)?.trim();
-    if (!name) return res.status(400).json({ error: 'name is required' });
+    const body = parseBody(ScenarioSchema, req, res); if (!body) return;
     const now = new Date().toISOString();
     const row = {
-      id: req.body?.id ?? randomUUID(), stream, name,
-      description: req.body?.description ?? null,
-      events: (req.body?.events ?? []) as any,
-      asOfDay: Number(req.body?.asOfDay ?? 0),
-      mode: req.body?.mode ?? 'minimal-edit',
+      id: body.id ?? randomUUID(), stream, name: body.name.trim(),
+      description: body.description ?? null,
+      events: body.events as any,
+      asOfDay: body.asOfDay,
+      mode: body.mode,
       createdAt: now, updatedAt: now,
     };
     await db.insert(schema.scenarios).values(row);
@@ -517,9 +524,9 @@ app.post('/api/scenarios', async (req, res) => {
 });
 
 app.put('/api/scenarios/:id', async (req, res) => {
+  const body = parseBody(ScenarioPatchSchema, req, res); if (!body) return;
   try {
-    const patch: any = { ...req.body, updatedAt: new Date().toISOString() };
-    delete patch.id; delete patch.createdAt; delete patch.stream;
+    const patch: any = { ...body, updatedAt: new Date().toISOString() };
     await db.update(schema.scenarios).set(patch).where(eq(schema.scenarios.id, req.params.id));
     res.json({ ok: true });
   } catch (e) { console.error(e); res.status(500).json({ error: 'update scenario failed', message: (e as Error).message }); }
@@ -549,8 +556,8 @@ app.get('/api/periods', async (req, res) => {
 
 app.post('/api/periods', async (req, res) => {
   try {
-    const { stream, code, label, startDate, endDate, horizonDays, status, copyPlanLinesFrom } = req.body ?? {};
-    if (!stream || !code || !startDate || !endDate) return res.status(400).json({ error: 'stream, code, startDate and endDate are required' });
+    const body = parseBody(PeriodSchema, req, res); if (!body) return;
+    const { stream, code, label, startDate, endDate, horizonDays, status, copyPlanLinesFrom } = body;
     const dup = await db.select().from(schema.planPeriods).where(and(eq(schema.planPeriods.stream, stream), eq(schema.planPeriods.code, code)));
     if (dup[0]) return res.status(400).json({ error: `period ${code} already exists for ${stream}` });
     const days = Number(horizonDays) || Math.max(1, Math.round((Date.parse(endDate) - Date.parse(startDate)) / 86400000) + 1);
@@ -573,8 +580,9 @@ app.post('/api/periods', async (req, res) => {
 });
 
 app.put('/api/periods/:id', async (req, res) => {
-  try { await db.update(schema.planPeriods).set(req.body).where(eq(schema.planPeriods.id, req.params.id)); res.json({ ok: true }); }
-  catch (e) { console.error(e); res.status(500).json({ error: 'update period failed', message: (e as Error).message }); }
+  const body = parseBody(PeriodPatchSchema, req, res); if (!body) return;
+  try { await db.update(schema.planPeriods).set(body).where(eq(schema.planPeriods.id, req.params.id)); res.json({ ok: true }); }
+  catch (e) { sendDbError(res, e, 'update period failed'); }
 });
 
 /** Settle a month: no further planning against it, but its versions and actuals remain. */
@@ -640,9 +648,10 @@ const normaliseActual = (stream: string, periodId: string, r: any) => {
 app.post('/api/actuals', async (req, res) => {
   try {
     const stream = (req.query.stream as string) || req.body?.stream || 'POL';
-    const period = await resolvePeriod(stream, req.body?.periodId);
+    const body = parseBody(ActualSchema, req, res); if (!body) return;
+    const period = await resolvePeriod(stream, body.periodId);
     if (!period) return res.status(400).json({ error: 'no planning period for this stream' });
-    const row = normaliseActual(stream, period.id, req.body ?? {});
+    const row = normaliseActual(stream, period.id, body);
     await db.insert(schema.actuals).values(row as any);
     res.json(row);
   } catch (e) { console.error(e); res.status(500).json({ error: 'create actual failed', message: (e as Error).message }); }
@@ -658,9 +667,9 @@ const sendDbError = (res: any, e: unknown, what: string) => {
 
 app.put('/api/actuals/:id', async (req, res) => {
   try {
-    const patch: any = { ...req.body };
+    const body = parseBody(ActualPatchSchema, req, res); if (!body) return;
+    const patch: any = { ...body };
     if (patch.costBreakdown) { const cb = addCost(ZERO_COST(), patch.costBreakdown); patch.costBreakdown = cb; patch.cost = Math.round(sumCost(cb)); }
-    delete patch.id; delete patch.createdAt;
     await db.update(schema.actuals).set(patch).where(eq(schema.actuals.id, req.params.id));
     res.json({ ok: true });
   } catch (e) { sendDbError(res, e, 'update actual failed'); }
@@ -677,10 +686,11 @@ app.delete('/api/actuals/:id', async (req, res) => {
 app.post('/api/actuals/bulk', async (req, res) => {
   try {
     const stream = (req.query.stream as string) || req.body?.stream || 'POL';
-    const period = await resolvePeriod(stream, req.body?.periodId);
+    const body = parseBody(ActualBulkSchema, req, res); if (!body) return;
+    const period = await resolvePeriod(stream, body.periodId);
     if (!period) return res.status(400).json({ error: 'no planning period for this stream' });
-    if (req.body?.replace) await db.delete(schema.actuals).where(and(eq(schema.actuals.stream, stream), eq(schema.actuals.periodId, period.id)));
-    const rows = (req.body?.rows ?? []).map((r: any) => normaliseActual(stream, period.id, { source: 'UPLOAD', ...r }));
+    if (body.replace) await db.delete(schema.actuals).where(and(eq(schema.actuals.stream, stream), eq(schema.actuals.periodId, period.id)));
+    const rows = body.rows.map((r: any) => normaliseActual(stream, period.id, { source: 'UPLOAD', ...r }));
     if (rows.length) await db.insert(schema.actuals).values(rows as any);
     res.json({ ok: true, inserted: rows.length, periodId: period.id });
   } catch (e) { console.error(e); res.status(500).json({ error: 'bulk actuals import failed', message: (e as Error).message }); }
@@ -934,14 +944,27 @@ const MASTER: Record<string, any> = {
   tanks: schema.tanks, nodeFlows: schema.nodeFlows, planLines: schema.planLines,
   berths: schema.berths, productCompatibility: schema.productCompatibility,
 };
+const masterSchema = (name: string) => MasterSchemas[name as MasterTable];
+
 app.post('/api/master/:table', async (req, res) => {
-  const t = MASTER[req.params.table]; if (!t) return res.status(404).json({ error: 'unknown table' });
-  const row = { id: req.body.id ?? randomUUID(), ...req.body };
-  await db.insert(t).values(row); res.json(row);
+  const t = MASTER[req.params.table]; const schema = masterSchema(req.params.table);
+  if (!t || !schema) return res.status(404).json({ error: 'unknown table' });
+  const body = parseBody(schema, req, res); if (!body) return;
+  try {
+    const row = { ...(body as Record<string, unknown>), id: (body as any).id ?? randomUUID() };
+    await db.insert(t).values(row); res.json(row);
+  } catch (e) { sendDbError(res, e, 'create failed'); }
 });
 app.put('/api/master/:table/:id', async (req, res) => {
-  const t = MASTER[req.params.table]; if (!t) return res.status(404).json({ error: 'unknown table' });
-  await db.update(t).set(req.body).where(eq(t.id, req.params.id)); res.json({ ok: true });
+  const t = MASTER[req.params.table]; const schema = masterSchema(req.params.table);
+  if (!t || !schema) return res.status(404).json({ error: 'unknown table' });
+  // A patch may be partial, but every field present must still be valid.
+  const loose = (schema as any).partial ? (schema as any).partial() : schema;
+  const body = parseBody(loose, req, res); if (!body) return;
+  try {
+    const patch = { ...(body as Record<string, unknown>) }; delete patch.id;
+    await db.update(t).set(patch).where(eq(t.id, req.params.id)); res.json({ ok: true });
+  } catch (e) { sendDbError(res, e, 'update failed'); }
 });
 app.delete('/api/master/:table/:id', async (req, res) => {
   const t = MASTER[req.params.table]; if (!t) return res.status(404).json({ error: 'unknown table' });
@@ -949,10 +972,16 @@ app.delete('/api/master/:table/:id', async (req, res) => {
 });
 // Bulk import (CSV/plan upload). Optionally replace all rows for a stream first.
 app.post('/api/master/:table/bulk', async (req, res) => {
-  const t = MASTER[req.params.table]; if (!t) return res.status(404).json({ error: 'unknown table' });
+  const t = MASTER[req.params.table]; const schema = masterSchema(req.params.table);
+  if (!t || !schema) return res.status(404).json({ error: 'unknown table' });
+  const parsed = parseBody(z.object({
+    rows: z.array(schema as any).max(20000),
+    replaceStream: z.enum(['CRUDE', 'LNG', 'POL']).optional(),
+  }), req, res);
+  if (!parsed) return;
   try {
-    const rows: any[] = req.body?.rows ?? [];
-    const replaceStream: string | undefined = req.body?.replaceStream;
+    const rows: any[] = parsed.rows as any[];
+    const replaceStream: string | undefined = parsed.replaceStream;
     if (replaceStream) await db.delete(t).where(eq(t.stream, replaceStream));
     const withIds = rows.map(r => ({ id: r.id ?? randomUUID(), ...r }));
     if (withIds.length) await db.insert(t).values(withIds);
@@ -1029,7 +1058,7 @@ async function startServer() {
     app.use(express.static(distPath));
     app.get('*', (_req, res) => res.sendFile(path.join(distPath, 'index.html')));
   }
-  app.listen(PORT, '0.0.0.0', () => console.log(`Server running on port ${PORT}`));
+  app.listen(PORT, '0.0.0.0', () => console.log(`Server running on port ${PORT} - ${describeConfig(cfg)}`));
 }
 
 startServer();
