@@ -7,6 +7,7 @@ import * as schema from './src/db/schema';
 import { eq, and, desc, sql } from 'drizzle-orm';
 import { migrate } from './src/db/migrate';
 import { sealPeriod, verifyChain, installLedgerGuards } from './src/db/ledger';
+import { repo, unscoped } from './src/db/repository';
 import { seed } from './src/db/seed';
 import { solve } from './src/lib/mirp/engine';
 import { validate } from './src/lib/mirp/validate';
@@ -34,57 +35,11 @@ const START_DATE = '2026-07-01';
 // indices everywhere are relative to that period's start date.
 // ---------------------------------------------------------------------------
 
-/** The stream's current planning period: the Open one, else the latest by code. */
-async function currentPeriod(stream: string) {
-  const rows = await db.select().from(schema.planPeriods).where(eq(schema.planPeriods.stream, stream));
-  if (!rows.length) return null;
-  const open = rows.filter(p => p.status === 'Open').sort((a, b) => b.code.localeCompare(a.code));
-  return open[0] ?? rows.sort((a, b) => b.code.localeCompare(a.code))[0];
-}
-
-async function periodById(id: string) {
-  const rows = await db.select().from(schema.planPeriods).where(eq(schema.planPeriods.id, id));
-  return rows[0] ?? null;
-}
-
-/** Resolve ?period= (id or code) for a stream, falling back to the current period. */
-async function resolvePeriod(stream: string, ref?: string) {
-  if (ref) {
-    const byId = await periodById(ref);
-    if (byId && byId.stream === stream) return byId;
-    const byCode = await db.select().from(schema.planPeriods)
-      .where(and(eq(schema.planPeriods.stream, stream), eq(schema.planPeriods.code, ref)));
-    if (byCode[0]) return byCode[0];
-  }
-  return currentPeriod(stream);
-}
-
-// ---------------------------------------------------------------------------
-// Load a stream-scoped EngineInput from the database.
-// ---------------------------------------------------------------------------
-async function loadEngineInput(stream: string, options?: EngineOptions): Promise<EngineInput> {
-  const period = await currentPeriod(stream);
-  const [products, locations, vessels, tanks, nodeFlows, berths, compatibility, planLines] = await Promise.all([
-    db.select().from(schema.products).where(eq(schema.products.stream, stream)),
-    db.select().from(schema.locations).where(eq(schema.locations.stream, stream)),
-    db.select().from(schema.vessels).where(eq(schema.vessels.stream, stream)),
-    db.select().from(schema.tanks).where(eq(schema.tanks.stream, stream)),
-    db.select().from(schema.nodeFlows).where(eq(schema.nodeFlows.stream, stream)),
-    db.select().from(schema.berths).where(eq(schema.berths.stream, stream)),
-    db.select().from(schema.productCompatibility).where(eq(schema.productCompatibility.stream, stream)),
-    db.select().from(schema.planLines).where(eq(schema.planLines.stream, stream)),
-  ]);
-  // Plan lines for the current period only (legacy rows with no period stay in scope).
-  const scoped = period ? planLines.filter(l => !l.periodId || l.periodId === period.id) : planLines;
-  return {
-    stream,
-    startDate: period?.startDate ?? START_DATE,
-    horizonDays: period?.horizonDays ?? HORIZON_DAYS,
-    products: products as any, locations: locations as any, vessels: vessels as any,
-    tanks: tanks as any, nodeFlows: nodeFlows as any, berths: berths as any,
-    compatibility: compatibility as any, planLines: scoped as any, options,
-  };
-}
+// Scoping is enforced by the repository, not repeated at each call site.
+const currentPeriod = (stream: string) => repo(stream).currentPeriod();
+const resolvePeriod = (stream: string, ref?: string | null) => repo(stream).resolvePeriod(ref);
+const loadEngineInput = (stream: string, options?: EngineOptions): Promise<EngineInput> =>
+  repo(stream).engineInput(options);
 
 // ---------------------------------------------------------------------------
 // Cost-category helpers. Every cost comparison in the app is a five-way split,
@@ -107,13 +62,12 @@ const sumCost = (c: Cost) => COST_KEYS.reduce((s, k) => s + c[k], 0);
 // Persist a solve result as a new (Active) schedule version, superseding prior.
 // ---------------------------------------------------------------------------
 async function persistVersion(stream: string, result: SolveResult, trigger: string, parentId: string | null, status: string = 'Active'): Promise<string> {
-  const existing = await db.select().from(schema.scheduleVersions).where(eq(schema.scheduleVersions.stream, stream));
-  const nextVersion = existing.reduce((m, v) => Math.max(m, v.version), 0) + 1;
+  const r = repo(stream);
+  const nextVersion = await r.nextVersionNumber();
   // Only a published/Active plan supersedes the prior operating plan; drafts don't.
-  if (status === 'Active') await db.update(schema.scheduleVersions).set({ status: 'Superseded' })
-    .where(and(eq(schema.scheduleVersions.stream, stream), eq(schema.scheduleVersions.status, 'Active')));
+  if (status === 'Active') await r.supersedeActive();
 
-  const period = await currentPeriod(stream);
+  const period = await r.currentPeriod();
   const id = randomUUID();
   const versionRow = {
     id, stream, runId: randomUUID(), version: nextVersion, parentId, trigger,
@@ -123,16 +77,13 @@ async function persistVersion(stream: string, result: SolveResult, trigger: stri
     payload: { voyages: result.voyages, charterRecommendations: result.charterRecommendations, unserved: result.unserved, validation: result.validation, message: result.message } as any,
     createdAt: new Date().toISOString(),
   };
-  await db.insert(schema.scheduleVersions).values(versionRow as any);
+  await r.insertVersion(versionRow as any);
 
   // The first published plan for a period becomes its baseline automatically —
   // otherwise there is nothing to measure the month against. Re-assignable later.
   if (status === 'Active' && period) {
-    const inPeriod = await db.select().from(schema.scheduleVersions)
-      .where(and(eq(schema.scheduleVersions.stream, stream), eq(schema.scheduleVersions.periodId, period.id)));
-    if (!inPeriod.some(v => v.isBaseline)) {
-      await db.update(schema.scheduleVersions).set({ isBaseline: true }).where(eq(schema.scheduleVersions.id, id));
-    }
+    const inPeriod = await r.versionsInPeriod(period.id);
+    if (!inPeriod.some(v => v.isBaseline)) await r.updateVersion(id, { isBaseline: true });
   }
 
   // Normalized voyage tables (browsable/queryable). Logical voyage ids repeat
@@ -140,33 +91,29 @@ async function persistVersion(stream: string, result: SolveResult, trigger: stri
   const idMap = new Map<string, string>();
   for (const v of result.voyages) {
     const vid = randomUUID(); idMap.set(v.id, vid);
-    await db.insert(schema.voyages).values({
+    await r.insertVoyage({
       id: vid, stream, versionId: id, vesselId: v.vesselId, vesselName: v.vesselName,
       vesselClass: v.vesselClass, pool: v.pool, startDay: v.startDay, endDay: v.endDay,
       cost: v.cost, costBreakdown: v.costBreakdown as any,
     });
     for (const s of v.stops) {
       const stopId = randomUUID();
-      await db.insert(schema.voyageStops).values({
+      await r.insertStop({
         id: stopId, voyageId: vid, seq: s.seq, locationId: s.locationId,
         arriveDay: s.arriveDay, departDay: s.departDay, kind: s.kind,
       });
-      for (const op of s.ops) await db.insert(schema.voyageOps).values({
+      for (const op of s.ops) await r.insertOp({
         id: randomUUID(), voyageId: vid, stopId, op: op.op, productId: op.productId, qty: op.qty, compartmentId: op.compartmentId,
       });
     }
   }
-  for (const r of result.charterRecommendations) await db.insert(schema.charterRecommendations).values({
-    id: randomUUID(), stream, versionId: id, voyageId: r.voyageId ? (idMap.get(r.voyageId) ?? null) : null, vesselClass: r.vesselClass, reason: r.reason, estCost: r.estCost,
+  for (const rec of result.charterRecommendations) await r.insertCharterRec({
+    id: randomUUID(), stream, versionId: id, voyageId: rec.voyageId ? (idMap.get(rec.voyageId) ?? null) : null, vesselClass: rec.vesselClass, reason: rec.reason, estCost: rec.estCost,
   });
   return id;
 }
 
-async function activeVersion(stream: string) {
-  const rows = await db.select().from(schema.scheduleVersions)
-    .where(and(eq(schema.scheduleVersions.stream, stream), eq(schema.scheduleVersions.status, 'Active')));
-  return rows[0] ?? null;
-}
+const activeVersion = (stream: string) => repo(stream).activeVersion();
 
 // ---------------------------------------------------------------------------
 // API
@@ -183,11 +130,11 @@ app.get('/api/dashboard', async (req, res) => {
     const locName = new Map(input.locations.map(l => [l.id, l.name]));
     const baseline = new InventoryModel(input).projections(prodName, locName);
 
-    const versions = await db.select().from(schema.scheduleVersions).where(eq(schema.scheduleVersions.stream, stream));
+    const r = repo(stream);
+    const versions = await r.versions();
     const payload: any = active?.payload ?? null;
-    const periods = (await db.select().from(schema.planPeriods).where(eq(schema.planPeriods.stream, stream)))
-      .sort((a, b) => b.code.localeCompare(a.code));
-    const period = await currentPeriod(stream);
+    const periods = await r.periodsDesc();
+    const period = await r.currentPeriod();
 
     res.json({
       stream, period, periods,
@@ -255,12 +202,10 @@ async function resolveOptions(stream: string, body: any): Promise<{ options: Eng
   const events: ScenarioEvent[] = Array.isArray(body?.events) ? body.events : [];
   if (!events.length) return { options: raw, events: [], warnings: [], summary: [] };
 
-  const period = await currentPeriod(stream);
-  const [nodeFlows, vessels] = await Promise.all([
-    db.select().from(schema.nodeFlows).where(eq(schema.nodeFlows.stream, stream)),
-    db.select().from(schema.vessels).where(eq(schema.vessels.stream, stream)),
-  ]);
-  const active = await activeVersion(stream);
+  const r = repo(stream);
+  const period = await r.currentPeriod();
+  const [nodeFlows, vessels] = await Promise.all([r.nodeFlows(), r.vessels()]);
+  const active = await r.activeVersion();
   const compiled = compileEvents(events, {
     horizonDays: period?.horizonDays ?? HORIZON_DAYS,
     nodeFlows: nodeFlows as any,
@@ -405,27 +350,32 @@ app.post('/api/scenario/candidates', async (req, res) => {
 });
 
 // Publish a version (draft or superseded) as the operating plan.
-async function makeActive(id: string, res: any) {
-  const rows = await db.select().from(schema.scheduleVersions).where(eq(schema.scheduleVersions.id, id));
-  if (!rows[0]) return res.status(404).json({ error: 'not found' });
-  await db.update(schema.scheduleVersions).set({ status: 'Superseded' }).where(and(eq(schema.scheduleVersions.stream, rows[0].stream), eq(schema.scheduleVersions.status, 'Active')));
-  await db.update(schema.scheduleVersions).set({ status: 'Active' }).where(eq(schema.scheduleVersions.id, id));
+/**
+ * Publish a version as the operating plan. Rollback is the same operation seen from
+ * the other direction — making a superseded version current — so both routes share it
+ * rather than pretending to differ.
+ */
+async function makeActive(stream: string, id: string, res: any) {
+  const r = repo(stream);
+  const row = await r.versionById(id);
+  if (!row) return res.status(404).json({ error: 'not found' });
+  await r.supersedeActive();
+  await r.updateVersion(id, { status: 'Active' });
   res.json({ ok: true });
 }
-app.post('/api/versions/:id/publish', (req, res) => makeActive(req.params.id, res));
-app.post('/api/versions/:id/rollback', (req, res) => makeActive(req.params.id, res));
+const streamOf = (req: any) => (req.query.stream as string) || 'POL';
+app.post('/api/versions/:id/publish', (req, res) => makeActive(streamOf(req), req.params.id, res));
+app.post('/api/versions/:id/rollback', (req, res) => makeActive(streamOf(req), req.params.id, res));
 
 // Discard a non-active version and its voyages.
 app.delete('/api/versions/:id', async (req, res) => {
   try {
-    const rows = await db.select().from(schema.scheduleVersions).where(eq(schema.scheduleVersions.id, req.params.id));
-    if (!rows[0]) return res.status(404).json({ error: 'not found' });
-    if (rows[0].status === 'Active') return res.status(400).json({ error: 'cannot discard the active plan' });
-    const voys = await db.select().from(schema.voyages).where(eq(schema.voyages.versionId, req.params.id));
-    for (const v of voys) { await db.delete(schema.voyageOps).where(eq(schema.voyageOps.voyageId, v.id)); await db.delete(schema.voyageStops).where(eq(schema.voyageStops.voyageId, v.id)); }
-    await db.delete(schema.voyages).where(eq(schema.voyages.versionId, req.params.id));
-    await db.delete(schema.charterRecommendations).where(eq(schema.charterRecommendations.versionId, req.params.id));
-    await db.delete(schema.scheduleVersions).where(eq(schema.scheduleVersions.id, req.params.id));
+    const r = repo(streamOf(req));
+    const row = await r.versionById(req.params.id);
+    if (!row) return res.status(404).json({ error: 'not found' });
+    if (row.status === 'Active') return res.status(400).json({ error: 'cannot discard the active plan' });
+    await r.deleteVoyageTree(req.params.id);
+    await r.deleteVersion(req.params.id);
     res.json({ ok: true });
   } catch (e) { console.error(e); res.status(500).json({ error: 'discard failed', message: (e as Error).message }); }
 });
@@ -450,16 +400,19 @@ app.post('/api/replan', async (req, res) => {
 app.get('/api/versions', async (req, res) => {
   const stream = (req.query.stream as string) || 'POL';
   const periodId = req.query.periodId as string | undefined;
-  let rows = await db.select().from(schema.scheduleVersions).where(eq(schema.scheduleVersions.stream, stream));
+  let rows = await repo(stream).versions();
   if (periodId) rows = rows.filter(v => v.periodId === periodId);
   res.json(rows.map(v => ({ id: v.id, version: v.version, status: v.status, trigger: v.trigger, objectiveCost: v.objectiveCost, achievable: v.achievable, createdAt: v.createdAt, periodId: v.periodId, isBaseline: v.isBaseline, kpi: v.kpi })).sort((a, b) => b.version - a.version));
 });
 
 app.get('/api/versions/compare', async (req, res) => {
-  const a = await db.select().from(schema.scheduleVersions).where(eq(schema.scheduleVersions.id, req.query.a as string));
-  const b = await db.select().from(schema.scheduleVersions).where(eq(schema.scheduleVersions.id, req.query.b as string));
-  if (!a[0] || !b[0]) return res.status(404).json({ error: 'version not found' });
-  if (a[0].stream !== b[0].stream) return res.status(400).json({ error: 'cannot compare versions from different streams' });
+  // Both ids must resolve before the pair can be judged, so this is one of the two
+  // places that reads across streams on purpose.
+  const va = await unscoped.versionByIdAnyStream(req.query.a as string);
+  const vb = await unscoped.versionByIdAnyStream(req.query.b as string);
+  if (!va || !vb) return res.status(404).json({ error: 'version not found' });
+  if (va.stream !== vb.stream) return res.status(400).json({ error: 'cannot compare versions from different streams' });
+  const a = [va], b = [vb];
   const ka: any = a[0].kpi ?? {}, kb: any = b[0].kpi ?? {};
   const n = (x: any) => Number(x ?? 0);
   const ca = addCost(ZERO_COST(), ka.costBreakdown), cb = addCost(ZERO_COST(), kb.costBreakdown);
@@ -478,21 +431,22 @@ app.get('/api/versions/compare', async (req, res) => {
 // Designate a version as its period's baseline — the frozen plan the month is measured against.
 app.post('/api/versions/:id/baseline', async (req, res) => {
   try {
-    const rows = await db.select().from(schema.scheduleVersions).where(eq(schema.scheduleVersions.id, req.params.id));
-    const v = rows[0];
+    const stream = (req.query.stream as string) || 'POL';
+    const r = repo(stream);
+    const v = await r.versionById(req.params.id);
     if (!v) return res.status(404).json({ error: 'not found' });
     if (!v.periodId) return res.status(400).json({ error: 'version is not assigned to a planning period' });
-    await db.update(schema.scheduleVersions).set({ isBaseline: false })
-      .where(and(eq(schema.scheduleVersions.stream, v.stream), eq(schema.scheduleVersions.periodId, v.periodId)));
-    await db.update(schema.scheduleVersions).set({ isBaseline: true }).where(eq(schema.scheduleVersions.id, v.id));
+    await r.clearBaseline(v.periodId);
+    await r.updateVersion(v.id, { isBaseline: true });
     res.json({ ok: true, periodId: v.periodId, version: v.version });
   } catch (e) { console.error(e); res.status(500).json({ error: 'set baseline failed', message: (e as Error).message }); }
 });
 
 app.get('/api/versions/:id', async (req, res) => {
-  const rows = await db.select().from(schema.scheduleVersions).where(eq(schema.scheduleVersions.id, req.params.id));
-  if (!rows[0]) return res.status(404).json({ error: 'not found' });
-  res.json(rows[0]);
+  const stream = (req.query.stream as string) || 'POL';
+  const row = await repo(stream).versionById(req.params.id);
+  if (!row) return res.status(404).json({ error: 'not found' });
+  res.json(row);
 });
 
 // ---------------------------------------------------------------------------
@@ -501,8 +455,7 @@ app.get('/api/versions/:id', async (req, res) => {
 
 app.get('/api/scenarios', async (req, res) => {
   const stream = (req.query.stream as string) || 'POL';
-  const rows = await db.select().from(schema.scenarios).where(eq(schema.scenarios.stream, stream));
-  res.json(rows.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)));
+  res.json(await repo(stream).scenariosDesc());
 });
 
 app.post('/api/scenarios', async (req, res) => {
@@ -518,7 +471,7 @@ app.post('/api/scenarios', async (req, res) => {
       mode: body.mode,
       createdAt: now, updatedAt: now,
     };
-    await db.insert(schema.scenarios).values(row);
+    await repo(stream).insertScenario(row);
     res.json(row);
   } catch (e) { console.error(e); res.status(500).json({ error: 'save scenario failed', message: (e as Error).message }); }
 });
@@ -527,13 +480,13 @@ app.put('/api/scenarios/:id', async (req, res) => {
   const body = parseBody(ScenarioPatchSchema, req, res); if (!body) return;
   try {
     const patch: any = { ...body, updatedAt: new Date().toISOString() };
-    await db.update(schema.scenarios).set(patch).where(eq(schema.scenarios.id, req.params.id));
+    await repo(streamOf(req)).updateScenario(req.params.id, patch);
     res.json({ ok: true });
   } catch (e) { console.error(e); res.status(500).json({ error: 'update scenario failed', message: (e as Error).message }); }
 });
 
 app.delete('/api/scenarios/:id', async (req, res) => {
-  await db.delete(schema.scenarios).where(eq(schema.scenarios.id, req.params.id));
+  await repo(streamOf(req)).deleteScenario(req.params.id);
   res.json({ ok: true });
 });
 
@@ -543,10 +496,11 @@ app.delete('/api/scenarios/:id', async (req, res) => {
 
 app.get('/api/periods', async (req, res) => {
   const stream = (req.query.stream as string) || 'POL';
-  const rows = await db.select().from(schema.planPeriods).where(eq(schema.planPeriods.stream, stream));
-  const versions = await db.select().from(schema.scheduleVersions).where(eq(schema.scheduleVersions.stream, stream));
-  const acts = await db.select().from(schema.actuals).where(eq(schema.actuals.stream, stream));
-  res.json(rows.sort((a, b) => b.code.localeCompare(a.code)).map(p => ({
+  const r = repo(stream);
+  const rows = await r.periodsDesc();
+  const versions = await r.versions();
+  const acts = await r.actuals();
+  res.json(rows.map(p => ({
     ...p,
     versionCount: versions.filter(v => v.periodId === p.id).length,
     baselineVersion: versions.find(v => v.periodId === p.id && v.isBaseline)?.version ?? null,
@@ -558,21 +512,21 @@ app.post('/api/periods', async (req, res) => {
   try {
     const body = parseBody(PeriodSchema, req, res); if (!body) return;
     const { stream, code, label, startDate, endDate, horizonDays, status, copyPlanLinesFrom } = body;
-    const dup = await db.select().from(schema.planPeriods).where(and(eq(schema.planPeriods.stream, stream), eq(schema.planPeriods.code, code)));
-    if (dup[0]) return res.status(400).json({ error: `period ${code} already exists for ${stream}` });
+    const r = repo(stream);
+    if ((await r.periods()).some(p => p.code === code)) return res.status(400).json({ error: `period ${code} already exists for ${stream}` });
     const days = Number(horizonDays) || Math.max(1, Math.round((Date.parse(endDate) - Date.parse(startDate)) / 86400000) + 1);
     const row = {
       id: randomUUID(), stream, code, label: label || code, startDate, endDate,
       horizonDays: days, status: status || 'Open', createdAt: new Date().toISOString(),
     };
-    await db.insert(schema.planPeriods).values(row);
+    await r.insertPeriod(row);
     // Rolling a month forward: carry the previous month's plan lines over as a starting point.
     let copied = 0;
     if (copyPlanLinesFrom) {
-      const src = await db.select().from(schema.planLines).where(eq(schema.planLines.stream, stream));
+      const src = await r.planLines();
       const rows = src.filter(l => l.periodId === copyPlanLinesFrom)
         .map(l => ({ ...l, id: randomUUID(), periodId: row.id, windowStart: startDate, windowEnd: endDate }));
-      if (rows.length) await db.insert(schema.planLines).values(rows);
+      await r.insertPlanLines(rows);
       copied = rows.length;
     }
     res.json({ ...row, planLinesCopied: copied });
@@ -581,40 +535,43 @@ app.post('/api/periods', async (req, res) => {
 
 app.put('/api/periods/:id', async (req, res) => {
   const body = parseBody(PeriodPatchSchema, req, res); if (!body) return;
-  try { await db.update(schema.planPeriods).set(body).where(eq(schema.planPeriods.id, req.params.id)); res.json({ ok: true }); }
+  try { await repo(streamOf(req)).updatePeriod(req.params.id, body); res.json({ ok: true }); }
   catch (e) { sendDbError(res, e, 'update period failed'); }
 });
 
 /** Settle a month: no further planning against it, but its versions and actuals remain. */
 app.post('/api/periods/:id/close', async (req, res) => {
   try {
-    const p = await periodById(req.params.id);
+    const r = repo(streamOf(req));
+    const p = await r.periodById(req.params.id);
     if (!p) return res.status(404).json({ error: 'not found' });
     // Seal BEFORE flipping status: once Closed, the guard rejects the writes the
     // chain needs to make.
     const sealed = await sealPeriod(p.stream, p.id);
-    await db.update(schema.planPeriods).set({ status: 'Closed' }).where(eq(schema.planPeriods.id, p.id));
+    await r.updatePeriod(p.id, { status: 'Closed' });
     res.json({ ok: true, sealed });
   } catch (e) { console.error(e); res.status(500).json({ error: 'close period failed', message: (e as Error).message }); }
 });
 
 /** Make this the live planning month; every other period for the stream is closed. */
 app.post('/api/periods/:id/open', async (req, res) => {
-  const p = await periodById(req.params.id);
+  const r = repo(streamOf(req));
+  const p = await r.periodById(req.params.id);
   if (!p) return res.status(404).json({ error: 'not found' });
-  await db.update(schema.planPeriods).set({ status: 'Closed' }).where(eq(schema.planPeriods.stream, p.stream));
-  await db.update(schema.planPeriods).set({ status: 'Open' }).where(eq(schema.planPeriods.id, p.id));
+  await r.closeAllPeriods();
+  await r.updatePeriod(p.id, { status: 'Open' });
   res.json({ ok: true });
 });
 
 app.delete('/api/periods/:id', async (req, res) => {
-  const p = await periodById(req.params.id);
+  const r = repo(streamOf(req));
+  const p = await r.periodById(req.params.id);
   if (!p) return res.status(404).json({ error: 'not found' });
-  const vs = await db.select().from(schema.scheduleVersions).where(eq(schema.scheduleVersions.periodId, p.id));
+  const vs = await r.versionsInPeriod(p.id);
   if (vs.length) return res.status(400).json({ error: `period has ${vs.length} plan version(s) — delete those first` });
-  await db.delete(schema.actuals).where(eq(schema.actuals.periodId, p.id));
-  await db.delete(schema.planLines).where(eq(schema.planLines.periodId, p.id));
-  await db.delete(schema.planPeriods).where(eq(schema.planPeriods.id, p.id));
+  await r.deleteActualsInPeriod(p.id);
+  await r.deletePlanLinesInPeriod(p.id);
+  await r.deletePeriod(p.id);
   res.json({ ok: true });
 });
 
@@ -625,8 +582,8 @@ app.delete('/api/periods/:id', async (req, res) => {
 app.get('/api/actuals', async (req, res) => {
   const stream = (req.query.stream as string) || 'POL';
   const period = await resolvePeriod(stream, req.query.periodId as string | undefined);
-  const rows = await db.select().from(schema.actuals).where(eq(schema.actuals.stream, stream));
-  res.json(rows.filter(a => !period || a.periodId === period.id).sort((a, b) => a.startDay - b.startDay));
+  const rows = period ? await repo(stream).actualsInPeriod(period.id) : await repo(stream).actuals();
+  res.json(rows.sort((a, b) => a.startDay - b.startDay));
 });
 
 const normaliseActual = (stream: string, periodId: string, r: any) => {
@@ -652,7 +609,7 @@ app.post('/api/actuals', async (req, res) => {
     const period = await resolvePeriod(stream, body.periodId);
     if (!period) return res.status(400).json({ error: 'no planning period for this stream' });
     const row = normaliseActual(stream, period.id, body);
-    await db.insert(schema.actuals).values(row as any);
+    await repo(stream).insertActuals([row as any]);
     res.json(row);
   } catch (e) { console.error(e); res.status(500).json({ error: 'create actual failed', message: (e as Error).message }); }
 });
@@ -670,14 +627,14 @@ app.put('/api/actuals/:id', async (req, res) => {
     const body = parseBody(ActualPatchSchema, req, res); if (!body) return;
     const patch: any = { ...body };
     if (patch.costBreakdown) { const cb = addCost(ZERO_COST(), patch.costBreakdown); patch.costBreakdown = cb; patch.cost = Math.round(sumCost(cb)); }
-    await db.update(schema.actuals).set(patch).where(eq(schema.actuals.id, req.params.id));
+    await repo(streamOf(req)).updateActual(req.params.id, patch);
     res.json({ ok: true });
   } catch (e) { sendDbError(res, e, 'update actual failed'); }
 });
 
 app.delete('/api/actuals/:id', async (req, res) => {
   try {
-    await db.delete(schema.actuals).where(eq(schema.actuals.id, req.params.id));
+    await repo(streamOf(req)).deleteActual(req.params.id);
     res.json({ ok: true });
   } catch (e) { sendDbError(res, e, 'delete actual failed'); }
 });
@@ -689,9 +646,9 @@ app.post('/api/actuals/bulk', async (req, res) => {
     const body = parseBody(ActualBulkSchema, req, res); if (!body) return;
     const period = await resolvePeriod(stream, body.periodId);
     if (!period) return res.status(400).json({ error: 'no planning period for this stream' });
-    if (body.replace) await db.delete(schema.actuals).where(and(eq(schema.actuals.stream, stream), eq(schema.actuals.periodId, period.id)));
+    if (body.replace) await repo(stream).deleteActualsInPeriod(period.id);
     const rows = body.rows.map((r: any) => normaliseActual(stream, period.id, { source: 'UPLOAD', ...r }));
-    if (rows.length) await db.insert(schema.actuals).values(rows as any);
+    await repo(stream).insertActuals(rows as any);
     res.json({ ok: true, inserted: rows.length, periodId: period.id });
   } catch (e) { console.error(e); res.status(500).json({ error: 'bulk actuals import failed', message: (e as Error).message }); }
 });
@@ -700,7 +657,7 @@ app.delete('/api/actuals', async (req, res) => {
   const stream = (req.query.stream as string) || 'POL';
   const period = await resolvePeriod(stream, req.query.periodId as string | undefined);
   if (!period) return res.status(400).json({ error: 'no planning period' });
-  await db.delete(schema.actuals).where(and(eq(schema.actuals.stream, stream), eq(schema.actuals.periodId, period.id)));
+  await repo(stream).deleteActualsInPeriod(period.id);
   res.json({ ok: true });
 });
 
@@ -720,7 +677,7 @@ app.post('/api/actuals/simulate', async (req, res) => {
     const period = await resolvePeriod(stream, req.body?.periodId);
     if (!period) return res.status(400).json({ error: 'no planning period for this stream' });
 
-    const versions = await db.select().from(schema.scheduleVersions).where(eq(schema.scheduleVersions.stream, stream));
+    const versions = await repo(stream).versions();
     const inPeriod = versions.filter(v => v.periodId === period.id && v.status !== 'Draft');
     const src = req.body?.versionId ? versions.find(v => v.id === req.body.versionId)
       : (inPeriod.find(v => v.status === 'Active') ?? inPeriod.find(v => v.isBaseline) ?? inPeriod.sort((a, b) => b.version - a.version)[0]);
@@ -735,7 +692,7 @@ app.post('/api/actuals/simulate', async (req, res) => {
     const cancelRate = Number(req.body?.cancelRate ?? 0.05);
     const jitter = () => 1 + bias + (rnd() * 2 - 1) * spread;
 
-    await db.delete(schema.actuals).where(and(eq(schema.actuals.stream, stream), eq(schema.actuals.periodId, period.id)));
+    await repo(stream).deleteActualsInPeriod(period.id);
 
     const rows: any[] = [];
     for (const v of voyages) {
@@ -785,7 +742,7 @@ app.post('/api/actuals/simulate', async (req, res) => {
       }));
     }
 
-    if (rows.length) await db.insert(schema.actuals).values(rows as any);
+    await repo(stream).insertActuals(rows as any);
     res.json({ ok: true, inserted: rows.length, periodId: period.id, versionId: src.id, version: src.version });
   } catch (e) { console.error(e); res.status(500).json({ error: 'simulate actuals failed', message: (e as Error).message }); }
 });
@@ -831,10 +788,10 @@ app.get('/api/performance', async (req, res) => {
     const period = await resolvePeriod(stream, req.query.periodId as string | undefined);
     if (!period) return res.json({ period: null, baseline: null, current: null, actual: rollupActuals([]), lines: [], voyageMatches: [] });
 
-    const versions = await db.select().from(schema.scheduleVersions).where(eq(schema.scheduleVersions.stream, stream));
+    const r = repo(stream);
+    const versions = await r.versions();
     const { baseline, current, currentRow } = periodRefs(versions, period.id);
-    const actRows = (await db.select().from(schema.actuals).where(eq(schema.actuals.stream, stream)))
-      .filter(a => a.periodId === period.id);
+    const actRows = await r.actualsInPeriod(period.id);
     const actual = rollupActuals(actRows);
 
     const bCost = addCost(ZERO_COST(), (baseline?.kpi as any)?.costBreakdown);
@@ -910,9 +867,10 @@ app.get('/api/performance', async (req, res) => {
 app.get('/api/performance/trend', async (req, res) => {
   try {
     const stream = (req.query.stream as string) || 'POL';
-    const periods = await db.select().from(schema.planPeriods).where(eq(schema.planPeriods.stream, stream));
-    const versions = await db.select().from(schema.scheduleVersions).where(eq(schema.scheduleVersions.stream, stream));
-    const acts = await db.select().from(schema.actuals).where(eq(schema.actuals.stream, stream));
+    const r = repo(stream);
+    const periods = await r.periods();
+    const versions = await r.versions();
+    const acts = await r.actuals();
 
     const points = periods.sort((a, b) => a.code.localeCompare(b.code)).map(p => {
       const { baseline, current, count } = periodRefs(versions, p.id);
@@ -1013,7 +971,7 @@ app.get('/api/ledger/verify', async (req, res) => {
     const streams = req.query.stream ? [String(req.query.stream)] : ['CRUDE', 'LNG', 'POL'];
     const checks = [];
     for (const st of streams) {
-      const periods = await db.select().from(schema.planPeriods).where(eq(schema.planPeriods.stream, st));
+      const periods = await repo(st).periods();
       for (const p of periods.sort((a, b) => a.code.localeCompare(b.code))) {
         checks.push({ period: p.label, status: p.status, ...(await verifyChain('actuals', st, p.id)) });
         checks.push({ period: p.label, status: p.status, ...(await verifyChain('schedule_versions', st, p.id)) });

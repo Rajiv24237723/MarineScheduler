@@ -74,7 +74,7 @@ export default function ReplanningView({ data, stream, refresh, thresholds }: { 
     setDraft(null); setCandidates(null); setCheck(null); setWarnings([]);
     toast(`Loaded “${s.name}” — ${(s.events ?? []).length} event(s).`, 'info');
   };
-  const deleteScenario = async (id: string) => { await fetch(`/api/scenarios/${id}`, { method: 'DELETE' }); await loadScenarios(); };
+  const deleteScenario = async (id: string) => { await fetch(`/api/scenarios/${id}?stream=${stream}`, { method: 'DELETE' }); await loadScenarios(); };
 
   // The server compiles events → engine options, so posture is all the client sends.
   const body = (extra: any = {}) => JSON.stringify({ events, options: { asOfDay: asOf, mode }, thresholds, ...extra });
@@ -84,13 +84,13 @@ export default function ReplanningView({ data, stream, refresh, thresholds }: { 
   const doCheck = async () => { setBusy(true); setDraft(null); setCandidates(null); try { const res = await POST('check'); setCheck(res); setWarnings(res.warnings ?? []); } catch (e) { console.error(e); } setBusy(false); };
   const doSimulate = async () => { setBusy(true); setCandidates(null); try { const res = await POST('apply', { name: mode }); setDraft(res); setWarnings(res.warnings ?? []); setCheck({ hasPlan: true, holds: res.currentPlanHolds, breaches: res.breaches, decision: res.decision, activeVersion: active?.version }); await refresh(); toast(`Recovery draft created — ${res.changeSet?.removed ?? 0} removed / ${res.changeSet?.added ?? 0} added.`, 'success'); } catch (e) { console.error(e); toast('Simulation failed.', 'error'); } setBusy(false); };
   const doCandidates = async () => { setBusy(true); setDraft(null); try { const res = await POST('candidates'); setCandidates(res); setWarnings(res.warnings ?? []); setCheck({ hasPlan: true, holds: res.holds, breaches: res.breaches, decision: res.decision, activeVersion: active?.version }); await refresh(); toast(`Generated ${res.candidates?.length ?? 0} recovery candidates.`, 'success'); } catch (e) { console.error(e); toast('Candidate generation failed.', 'error'); } setBusy(false); };
-  const publish = async (id: string) => { await fetch(`/api/versions/${id}/publish`, { method: 'POST' }); setDraft(null); setCheck(null); await refresh(); toast('Draft published as the operating plan.', 'success'); };
-  const rollback = async (id: string) => { await fetch(`/api/versions/${id}/rollback`, { method: 'POST' }); await refresh(); toast('Rolled back — this version is now active.', 'success'); };
-  const discard = async (id: string) => { await fetch(`/api/versions/${id}`, { method: 'DELETE' }); if (draft?.versionId === id) setDraft(null); await refresh(); toast('Draft discarded.', 'info'); };
-  const publishCandidate = async (chosen: any) => { await fetch(`/api/versions/${chosen.versionId}/publish`, { method: 'POST' }); for (const c of candidates.candidates) if (c.versionId !== chosen.versionId) await fetch(`/api/versions/${c.versionId}`, { method: 'DELETE' }); setCandidates(null); setCheck(null); await refresh(); toast(`Published “${chosen.label}” recovery as the operating plan.`, 'success'); };
-  const discardCandidates = async () => { for (const c of candidates.candidates) await fetch(`/api/versions/${c.versionId}`, { method: 'DELETE' }); setCandidates(null); await refresh(); toast('Candidates discarded.', 'info'); };
+  const publish = async (id: string) => { await fetch(`/api/versions/${id}/publish?stream=${stream}`, { method: 'POST' }); setDraft(null); setCheck(null); await refresh(); toast('Draft published as the operating plan.', 'success'); };
+  const rollback = async (id: string) => { await fetch(`/api/versions/${id}/rollback?stream=${stream}`, { method: 'POST' }); await refresh(); toast('Rolled back — this version is now active.', 'success'); };
+  const discard = async (id: string) => { await fetch(`/api/versions/${id}?stream=${stream}`, { method: 'DELETE' }); if (draft?.versionId === id) setDraft(null); await refresh(); toast('Draft discarded.', 'info'); };
+  const publishCandidate = async (chosen: any) => { await fetch(`/api/versions/${chosen.versionId}/publish?stream=${stream}`, { method: 'POST' }); for (const c of candidates.candidates) if (c.versionId !== chosen.versionId) await fetch(`/api/versions/${c.versionId}?stream=${stream}`, { method: 'DELETE' }); setCandidates(null); setCheck(null); await refresh(); toast(`Published “${chosen.label}” recovery as the operating plan.`, 'success'); };
+  const discardCandidates = async () => { for (const c of candidates.candidates) await fetch(`/api/versions/${c.versionId}?stream=${stream}`, { method: 'DELETE' }); setCandidates(null); await refresh(); toast('Candidates discarded.', 'info'); };
   const compare = async () => { if (!a || !b) return; const r = await fetch(`/api/versions/compare?a=${a}&b=${b}`); setCmp(await r.json()); };
-  const openVersion = async (id: string, v: number) => { const r = await fetch(`/api/versions/${id}`); const row = await r.json(); setVersionVoyages({ v, voyages: row.payload?.voyages ?? [] }); };
+  const openVersion = async (id: string, v: number) => { const r = await fetch(`/api/versions/${id}?stream=${stream}`); const row = await r.json(); setVersionVoyages({ v, voyages: row.payload?.voyages ?? [] }); };
 
   return (
     <div className="space-y-5">

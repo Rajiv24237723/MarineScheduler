@@ -104,11 +104,11 @@ export default function PerformanceView({ data, stream, refresh }: { data: Dashb
     'Actuals cleared for this period.');
 
   const setBaseline = (id: string) => run(
-    () => fetch(`/api/versions/${id}/baseline`, { method: 'POST' }).then(r => r.json()),
+    () => fetch(`/api/versions/${id}/baseline?stream=${stream}`, { method: 'POST' }).then(r => r.json()),
     'Baseline set — the month is now measured against this plan.');
 
   const closePeriod = () => run(
-    () => fetch(`/api/periods/${periodId}/close`, { method: 'POST' }).then(r => r.json()),
+    () => fetch(`/api/periods/${periodId}/close?stream=${stream}`, { method: 'POST' }).then(r => r.json()),
     'Period closed.');
 
   const addActual = () => {
