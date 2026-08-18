@@ -14,7 +14,8 @@
     "gap": "tsx src/lib/mirp/milp/report.ts",
     "ledger:test": "tsx src/db/test/ledgerIntegrity.ts",
     "db:generate": "drizzle-kit generate",
-    "db:push": "drizzle-kit push"
+    "db:push": "drizzle-kit push",
+    "exact": "tsx src/lib/mirp/milp/exact.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.5",
