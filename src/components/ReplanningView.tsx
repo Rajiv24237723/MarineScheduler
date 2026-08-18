@@ -276,7 +276,7 @@ export default function ReplanningView({ data, stream, refresh, thresholds }: { 
                 <button onClick={() => openVersion(v.id, v.version)} className="flex items-center gap-3 text-left">
                   <span className="font-mono text-foreground/90">v{v.version}</span>
                   <span className={`px-1.5 py-0.5 rounded-md text-[9px] ${v.status === 'Active' ? 'bg-ok/10 text-ok border border-ok/20' : v.status === 'Draft' ? 'bg-cyan-500/10 text-cyan-300 border border-cyan-500/20' : 'bg-muted text-muted-foreground border border-border/60'}`}>{v.status}</span>
-                  {v.isBaseline === 1 && <span className="px-1.5 py-0.5 rounded-md text-[9px] bg-cyan-500/10 text-cyan-300 border border-cyan-500/20 flex items-center gap-1"><Flag className="w-2.5 h-2.5" /> baseline</span>}
+                  {v.isBaseline && <span className="px-1.5 py-0.5 rounded-md text-[9px] bg-cyan-500/10 text-cyan-300 border border-cyan-500/20 flex items-center gap-1"><Flag className="w-2.5 h-2.5" /> baseline</span>}
                   <span className="text-[10px] text-muted-foreground/80">{periodLabel(v.periodId)}</span>
                   <span className="text-muted-foreground">{v.trigger}</span>
                   <span className={v.achievable ? 'text-ok' : 'text-bad'}>{v.achievable ? 'achievable' : 'shortfall'}</span>

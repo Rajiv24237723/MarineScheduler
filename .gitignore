@@ -12,3 +12,4 @@ marine.db
 marine.db-journal
 marine.db-wal
 marine.db-shm
+.pgdata/

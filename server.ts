@@ -2,10 +2,11 @@ import express from 'express';
 import path from 'path';
 import { randomUUID } from 'crypto';
 import { createServer as createViteServer } from 'vite';
-import { db } from './src/db/index';
+import { db, getDb, driver } from './src/db/index';
 import * as schema from './src/db/schema';
 import { eq, and, desc, sql } from 'drizzle-orm';
-import { execSync } from 'child_process';
+import { migrate } from './src/db/migrate';
+import { sealPeriod, verifyChain, installLedgerGuards } from './src/db/ledger';
 import { seed } from './src/db/seed';
 import { solve } from './src/lib/mirp/engine';
 import { validate } from './src/lib/mirp/validate';
@@ -106,22 +107,23 @@ async function persistVersion(stream: string, result: SolveResult, trigger: stri
 
   const period = await currentPeriod(stream);
   const id = randomUUID();
-  await db.insert(schema.scheduleVersions).values({
+  const versionRow = {
     id, stream, runId: randomUUID(), version: nextVersion, parentId, trigger,
-    periodId: period?.id ?? null, isBaseline: 0,
-    status, objectiveCost: result.kpis.totalCost, achievable: result.achievable ? 1 : 0,
+    periodId: period?.id ?? null, isBaseline: false,
+    status, objectiveCost: result.kpis.totalCost, achievable: result.achievable,
     kpi: result.kpis as any, projection: result.projection as any, duals: result.duals as any,
     payload: { voyages: result.voyages, charterRecommendations: result.charterRecommendations, unserved: result.unserved, validation: result.validation, message: result.message } as any,
     createdAt: new Date().toISOString(),
-  });
+  };
+  await db.insert(schema.scheduleVersions).values(versionRow as any);
 
   // The first published plan for a period becomes its baseline automatically —
   // otherwise there is nothing to measure the month against. Re-assignable later.
   if (status === 'Active' && period) {
     const inPeriod = await db.select().from(schema.scheduleVersions)
       .where(and(eq(schema.scheduleVersions.stream, stream), eq(schema.scheduleVersions.periodId, period.id)));
-    if (!inPeriod.some(v => v.isBaseline === 1)) {
-      await db.update(schema.scheduleVersions).set({ isBaseline: 1 }).where(eq(schema.scheduleVersions.id, id));
+    if (!inPeriod.some(v => v.isBaseline)) {
+      await db.update(schema.scheduleVersions).set({ isBaseline: true }).where(eq(schema.scheduleVersions.id, id));
     }
   }
 
@@ -472,9 +474,9 @@ app.post('/api/versions/:id/baseline', async (req, res) => {
     const v = rows[0];
     if (!v) return res.status(404).json({ error: 'not found' });
     if (!v.periodId) return res.status(400).json({ error: 'version is not assigned to a planning period' });
-    await db.update(schema.scheduleVersions).set({ isBaseline: 0 })
+    await db.update(schema.scheduleVersions).set({ isBaseline: false })
       .where(and(eq(schema.scheduleVersions.stream, v.stream), eq(schema.scheduleVersions.periodId, v.periodId)));
-    await db.update(schema.scheduleVersions).set({ isBaseline: 1 }).where(eq(schema.scheduleVersions.id, v.id));
+    await db.update(schema.scheduleVersions).set({ isBaseline: true }).where(eq(schema.scheduleVersions.id, v.id));
     res.json({ ok: true, periodId: v.periodId, version: v.version });
   } catch (e) { console.error(e); res.status(500).json({ error: 'set baseline failed', message: (e as Error).message }); }
 });
@@ -540,7 +542,7 @@ app.get('/api/periods', async (req, res) => {
   res.json(rows.sort((a, b) => b.code.localeCompare(a.code)).map(p => ({
     ...p,
     versionCount: versions.filter(v => v.periodId === p.id).length,
-    baselineVersion: versions.find(v => v.periodId === p.id && v.isBaseline === 1)?.version ?? null,
+    baselineVersion: versions.find(v => v.periodId === p.id && v.isBaseline)?.version ?? null,
     actualCount: acts.filter(a => a.periodId === p.id).length,
   })));
 });
@@ -577,10 +579,15 @@ app.put('/api/periods/:id', async (req, res) => {
 
 /** Settle a month: no further planning against it, but its versions and actuals remain. */
 app.post('/api/periods/:id/close', async (req, res) => {
-  const p = await periodById(req.params.id);
-  if (!p) return res.status(404).json({ error: 'not found' });
-  await db.update(schema.planPeriods).set({ status: 'Closed' }).where(eq(schema.planPeriods.id, p.id));
-  res.json({ ok: true });
+  try {
+    const p = await periodById(req.params.id);
+    if (!p) return res.status(404).json({ error: 'not found' });
+    // Seal BEFORE flipping status: once Closed, the guard rejects the writes the
+    // chain needs to make.
+    const sealed = await sealPeriod(p.stream, p.id);
+    await db.update(schema.planPeriods).set({ status: 'Closed' }).where(eq(schema.planPeriods.id, p.id));
+    res.json({ ok: true, sealed });
+  } catch (e) { console.error(e); res.status(500).json({ error: 'close period failed', message: (e as Error).message }); }
 });
 
 /** Make this the live planning month; every other period for the stream is closed. */
@@ -636,10 +643,18 @@ app.post('/api/actuals', async (req, res) => {
     const period = await resolvePeriod(stream, req.body?.periodId);
     if (!period) return res.status(400).json({ error: 'no planning period for this stream' });
     const row = normaliseActual(stream, period.id, req.body ?? {});
-    await db.insert(schema.actuals).values(row);
+    await db.insert(schema.actuals).values(row as any);
     res.json(row);
   } catch (e) { console.error(e); res.status(500).json({ error: 'create actual failed', message: (e as Error).message }); }
 });
+
+/** A rejection from the settled-period trigger is a business rule, not a bug. */
+const guardReject = (e: unknown) => /period .* is closed|record is final/i.test(String((e as any)?.cause?.message ?? (e as Error)?.message ?? ''));
+const sendDbError = (res: any, e: unknown, what: string) => {
+  if (guardReject(e)) return res.status(409).json({ error: 'period closed', message: 'This planning period is closed; its record is final and cannot be changed.' });
+  console.error(e);
+  return res.status(500).json({ error: what, message: (e as Error).message });
+};
 
 app.put('/api/actuals/:id', async (req, res) => {
   try {
@@ -648,11 +663,14 @@ app.put('/api/actuals/:id', async (req, res) => {
     delete patch.id; delete patch.createdAt;
     await db.update(schema.actuals).set(patch).where(eq(schema.actuals.id, req.params.id));
     res.json({ ok: true });
-  } catch (e) { console.error(e); res.status(500).json({ error: 'update actual failed', message: (e as Error).message }); }
+  } catch (e) { sendDbError(res, e, 'update actual failed'); }
 });
 
 app.delete('/api/actuals/:id', async (req, res) => {
-  await db.delete(schema.actuals).where(eq(schema.actuals.id, req.params.id)); res.json({ ok: true });
+  try {
+    await db.delete(schema.actuals).where(eq(schema.actuals.id, req.params.id));
+    res.json({ ok: true });
+  } catch (e) { sendDbError(res, e, 'delete actual failed'); }
 });
 
 /** Bulk ingest (CSV/ERP extract). `replace` clears the period's existing rows first. */
@@ -663,7 +681,7 @@ app.post('/api/actuals/bulk', async (req, res) => {
     if (!period) return res.status(400).json({ error: 'no planning period for this stream' });
     if (req.body?.replace) await db.delete(schema.actuals).where(and(eq(schema.actuals.stream, stream), eq(schema.actuals.periodId, period.id)));
     const rows = (req.body?.rows ?? []).map((r: any) => normaliseActual(stream, period.id, { source: 'UPLOAD', ...r }));
-    if (rows.length) await db.insert(schema.actuals).values(rows);
+    if (rows.length) await db.insert(schema.actuals).values(rows as any);
     res.json({ ok: true, inserted: rows.length, periodId: period.id });
   } catch (e) { console.error(e); res.status(500).json({ error: 'bulk actuals import failed', message: (e as Error).message }); }
 });
@@ -695,7 +713,7 @@ app.post('/api/actuals/simulate', async (req, res) => {
     const versions = await db.select().from(schema.scheduleVersions).where(eq(schema.scheduleVersions.stream, stream));
     const inPeriod = versions.filter(v => v.periodId === period.id && v.status !== 'Draft');
     const src = req.body?.versionId ? versions.find(v => v.id === req.body.versionId)
-      : (inPeriod.find(v => v.status === 'Active') ?? inPeriod.find(v => v.isBaseline === 1) ?? inPeriod.sort((a, b) => b.version - a.version)[0]);
+      : (inPeriod.find(v => v.status === 'Active') ?? inPeriod.find(v => v.isBaseline) ?? inPeriod.sort((a, b) => b.version - a.version)[0]);
     if (!src) return res.status(400).json({ error: 'no plan version to execute for this period — run the optimiser first' });
 
     const voyages: any[] = (src.payload as any)?.voyages ?? [];
@@ -757,7 +775,7 @@ app.post('/api/actuals/simulate', async (req, res) => {
       }));
     }
 
-    if (rows.length) await db.insert(schema.actuals).values(rows);
+    if (rows.length) await db.insert(schema.actuals).values(rows as any);
     res.json({ ok: true, inserted: rows.length, periodId: period.id, versionId: src.id, version: src.version });
   } catch (e) { console.error(e); res.status(500).json({ error: 'simulate actuals failed', message: (e as Error).message }); }
 });
@@ -791,7 +809,7 @@ function rollupActuals(rows: any[]) {
 function periodRefs(versions: any[], periodId: string) {
   const inPeriod = versions.filter(v => v.periodId === periodId && v.status !== 'Draft');
   const byVersion = [...inPeriod].sort((a, b) => a.version - b.version);
-  const baseline = byVersion.find(v => v.isBaseline === 1) ?? byVersion[0] ?? null;
+  const baseline = byVersion.find(v => v.isBaseline) ?? byVersion[0] ?? null;
   const current = inPeriod.find(v => v.status === 'Active') ?? byVersion[byVersion.length - 1] ?? null;
   const ref = (v: any) => v ? { versionId: v.id, version: v.version, status: v.status, trigger: v.trigger, kpi: v.kpi ?? null } : null;
   return { baseline: ref(baseline), current: ref(current), baselineRow: baseline, currentRow: current, count: inPeriod.length };
@@ -944,11 +962,37 @@ app.post('/api/master/:table/bulk', async (req, res) => {
 // Reset all data back to the seeded demo network.
 app.post('/api/admin/reseed', async (_req, res) => {
   try {
-    const tables = [schema.charterRecommendations, schema.voyageOps, schema.voyageStops, schema.voyages, schema.actuals, schema.scheduleVersions, schema.scenarios, schema.planPeriods, schema.planLines, schema.nodeFlows, schema.berths, schema.productCompatibility, schema.tanks, schema.vessels, schema.locations, schema.products];
-    for (const t of tables) await db.delete(t);
+    // TRUNCATE rather than DELETE: it does not fire row-level triggers, so a full
+    // reset stays possible without an escape hatch that could bypass the ledger
+    // guards in normal operation.
+    await db.execute(sql`truncate table
+      charter_recommendations, voyage_ops, voyage_stops, voyages, actuals,
+      schedule_versions, scenarios, plan_periods, plan_lines, node_flows,
+      berths, product_compatibility, tanks, vessels, locations, products`);
     await seed(db);
     res.json({ ok: true });
   } catch (e) { console.error(e); res.status(500).json({ error: 'reseed failed', message: (e as Error).message }); }
+});
+
+/**
+ * Ledger integrity. Recomputes every digest and walks the prev_hash chain, so a
+ * mutated row fails its digest and a removed row breaks the walk. Independent of
+ * whatever the storage layer reports about itself.
+ */
+app.get('/api/ledger/verify', async (req, res) => {
+  try {
+    const streams = req.query.stream ? [String(req.query.stream)] : ['CRUDE', 'LNG', 'POL'];
+    const checks = [];
+    for (const st of streams) {
+      const periods = await db.select().from(schema.planPeriods).where(eq(schema.planPeriods.stream, st));
+      for (const p of periods.sort((a, b) => a.code.localeCompare(b.code))) {
+        checks.push({ period: p.label, status: p.status, ...(await verifyChain('actuals', st, p.id)) });
+        checks.push({ period: p.label, status: p.status, ...(await verifyChain('schedule_versions', st, p.id)) });
+      }
+    }
+    // Only sealed periods can fail; an open month simply has nothing to verify yet.
+    res.json({ driver, intact: checks.filter(c => c.sealed).every(c => c.intact), checks });
+  } catch (e) { console.error(e); res.status(500).json({ error: 'ledger verify failed', message: (e as Error).message }); }
 });
 
 // Free Open-Meteo marine weather (no key).
@@ -963,15 +1007,19 @@ app.get('/api/weather', async (req, res) => {
 // ---------------------------------------------------------------------------
 async function startServer() {
   try {
-    console.log('Pushing database schema...');
-    execSync('npx drizzle-kit push --force', { stdio: 'inherit' });
+    await getDb();
+    // Committed migrations, replayed in order — not a destructive schema diff.
+    const m = await migrate();
+    console.log(`Database ready on ${m.driver}; migrations applied.`);
+    // Same DDL in PGlite and in production Postgres, which is why one dialect matters.
+    await installLedgerGuards();
     const locCount = await db.select({ count: sql`count(*)` }).from(schema.locations);
-    if ((locCount[0] as any).count === 0) {
+    if (Number((locCount[0] as any).count) === 0) {
       console.log('Seeding July 2026 start-of-month plan...');
       await seed(db);
       console.log('Seed complete.');
     }
-  } catch (e) { console.error('Migration/Seed error:', e); }
+  } catch (e) { console.error('Startup (migrate/seed) failed:', e); process.exitCode = 1; }
 
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({ server: { middlewareMode: true }, appType: 'spa' });

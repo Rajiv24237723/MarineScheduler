@@ -33,7 +33,7 @@ export interface Berth {
 }
 export interface ProductCompat {
   id: string; stream: string; scope: string;   // COMPARTMENT | TANK
-  fromProduct: string; toProduct: string; allowed: number;
+  fromProduct: string; toProduct: string; allowed: boolean;
   changeoverHours: number; changeoverCost: number;
 }
 

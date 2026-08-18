@@ -401,7 +401,7 @@ export default function PerformanceView({ data, stream, refresh }: { data: Dashb
               <span className="flex items-center gap-2">
                 <span className="font-mono text-foreground/90">v{v.version}</span>
                 <span className="text-muted-foreground">{v.trigger}</span>
-                {v.isBaseline === 1 && <span className="px-1.5 py-0.5 rounded-md text-[9px] bg-cyan-500/15 text-cyan-300 border border-cyan-500/25">current baseline</span>}
+                {v.isBaseline && <span className="px-1.5 py-0.5 rounded-md text-[9px] bg-cyan-500/15 text-cyan-300 border border-cyan-500/25">current baseline</span>}
               </span>
               <span className="font-mono text-foreground/80">{M(v.objectiveCost)}</span>
             </button>

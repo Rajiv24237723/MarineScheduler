@@ -12,10 +12,12 @@
     "bench": "tsx src/lib/mirp/bench/run.ts",
     "bench:test": "tsx src/lib/mirp/bench/regression.ts",
     "gap": "tsx src/lib/mirp/milp/report.ts",
+    "ledger:test": "tsx src/db/test/ledgerIntegrity.ts",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push"
   },
   "dependencies": {
+    "@electric-sql/pglite": "^0.5.5",
     "@google/genai": "^2.4.0",
     "@radix-ui/react-dialog": "^1.1.19",
     "@radix-ui/react-popover": "^1.1.19",
@@ -37,6 +39,7 @@
     "leaflet": "^1.9.4",
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
+    "postgres": "^3.4.9",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
     "react-leaflet": "^5.0.0",

@@ -1,4 +1,6 @@
 ﻿import * as schema from './schema';
+import { sealPeriod } from './ledger';
+import { eq } from 'drizzle-orm';
 
 /**
  * IOCL-grounded coastal MIRP network, 30-day start-of-month plan (horizon day 0 = 2026-07-01).
@@ -278,7 +280,7 @@ export async function seed(db: any) {
     ['CRUDE', 'p5', 'p7', 1, 10, 160000], ['CRUDE', 'p7', 'p5', 1, 10, 160000],
     ['CRUDE', 'p6', 'p16', 1, 12, 200000], ['CRUDE', 'p16', 'p6', 1, 12, 200000],
   ];
-  const productCompatibility = compat.map(([stream, from, to, allowed, hrs, cost], i) => ({ id: `pc_${i + 1}`, stream, scope: 'COMPARTMENT', fromProduct: from, toProduct: to, allowed, changeoverHours: hrs, changeoverCost: cost }));
+  const productCompatibility = compat.map(([stream, from, to, allowed, hrs, cost], i) => ({ id: `pc_${i + 1}`, stream, scope: 'COMPARTMENT', fromProduct: from, toProduct: to, allowed: Boolean(allowed), changeoverHours: hrs, changeoverCost: cost }));
 
   // ---- One row per berth, not one row per port -----------------------------
   // A port with two simultaneous slots is two jetties, and a scenario needs to be
@@ -338,7 +340,7 @@ export async function seed(db: any) {
 
     MONTHS.forEach((m, mi) => {
       const periodId = `pp_${s.toLowerCase()}_${m.code}`;
-      periods.push({ id: periodId, stream: s, code: m.code, label: m.label, startDate: m.start, endDate: m.end, horizonDays: m.days, status: 'Closed', createdAt: iso(mi * 30 - 6) });
+      periods.push({ id: periodId, stream: s, code: m.code, label: m.label, startDate: m.start, endDate: m.end, horizonDays: m.days, status: 'Open', createdAt: iso(mi * 30 - 6) });
 
       const baseCost = h.cost * m.vol, baseMt = h.mt * m.vol;
       const planCost = baseCost * (1 + m.replan);
@@ -356,15 +358,15 @@ export async function seed(db: any) {
 
       const baseId = `sv_${s.toLowerCase()}_${m.code}_b`, finalId = `sv_${s.toLowerCase()}_${m.code}_f`;
       histVersions.push({
-        id: baseId, stream: s, runId: `hist_${++vSeq}`, version: ++versionNo, periodId, isBaseline: 1, parentId: null,
-        trigger: 'baseline:start-of-month', status: 'Superseded', objectiveCost: Math.round(baseCost), achievable: 1,
+        id: baseId, stream: s, runId: `hist_${++vSeq}`, version: ++versionNo, periodId, isBaseline: true, parentId: null,
+        trigger: 'baseline:start-of-month', status: 'Superseded', objectiveCost: Math.round(baseCost), achievable: true,
         kpi: kpiFor(baseCost, baseMt, nVoy, 100, spot - 1), projection: [], duals: [],
         payload: { voyages: [], charterRecommendations: [], unserved: [], validation: { ok: true, breaches: [] }, message: `Seeded ${m.label} start-of-month baseline (illustrative).` },
         createdAt: iso(mi * 30 - 5),
       });
       histVersions.push({
-        id: finalId, stream: s, runId: `hist_${++vSeq}`, version: ++versionNo, periodId, isBaseline: 0, parentId: baseId,
-        trigger: 'disruption:in-month replan', status: 'Superseded', objectiveCost: Math.round(planCost), achievable: m.served >= 100 ? 1 : 0,
+        id: finalId, stream: s, runId: `hist_${++vSeq}`, version: ++versionNo, periodId, isBaseline: false, parentId: baseId,
+        trigger: 'disruption:in-month replan', status: 'Superseded', objectiveCost: Math.round(planCost), achievable: m.served >= 100,
         kpi: kpiFor(planCost, baseMt, nVoy + spot, m.served, spot), projection: [], duals: [],
         payload: { voyages: [], charterRecommendations: [], unserved: [], validation: { ok: true, breaches: [] }, message: `Seeded ${m.label} end-of-month plan (illustrative).` },
         createdAt: iso(mi * 30 + 11),
@@ -415,4 +417,12 @@ export async function seed(db: any) {
   await db.insert(schema.productCompatibility).values(productCompatibility);
   await db.insert(schema.scheduleVersions).values(histVersions);
   await db.insert(schema.actuals).values(histActuals);
+  // Settle the historic months the same way the close endpoint does: seal the record
+  // first, then mark the period Closed. Sealing after closing would be rejected by
+  // the immutability guard, which is the guard working correctly.
+  for (const st of STREAMS) for (const m of MONTHS) {
+    const pid = `pp_${st.toLowerCase()}_${m.code}`;
+    await sealPeriod(st, pid);
+    await db.update(schema.planPeriods).set({ status: 'Closed' }).where(eq(schema.planPeriods.id, pid));
+  }
 }

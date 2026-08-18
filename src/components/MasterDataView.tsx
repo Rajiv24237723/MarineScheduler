@@ -42,7 +42,7 @@ const TABS: Record<string, { table: string; cols: Col[]; rows: (d: DashboardData
   },
   Compatibility: {
     table: 'productCompatibility', cols: [{ key: 'scope', label: 'Scope' }, { key: 'fromProduct', label: 'From' }, { key: 'toProduct', label: 'To' }, { key: 'allowed', label: 'Allowed', num: true }, { key: 'changeoverHours', label: 'Chg h', num: true }, { key: 'changeoverCost', label: 'Chg ₹', num: true }],
-    rows: d => d.compatibility, make: (s, d) => ({ stream: s, scope: 'COMPARTMENT', fromProduct: d.products[0]?.id, toProduct: d.products[1]?.id ?? d.products[0]?.id, allowed: 1, changeoverHours: 12, changeoverCost: 100000 }),
+    rows: d => d.compatibility, make: (s, d) => ({ stream: s, scope: 'COMPARTMENT', fromProduct: d.products[0]?.id, toProduct: d.products[1]?.id ?? d.products[0]?.id, allowed: true, changeoverHours: 12, changeoverCost: 100000 }),
   },
 };
 

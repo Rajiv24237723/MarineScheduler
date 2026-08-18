@@ -98,7 +98,7 @@ export function runGreedy(input: EngineInput, inv: InventoryModel, rand: () => n
   // Compartment compatibility lookup.
   const compat = new Map<string, { allowed: boolean; hours: number; cost: number }>();
   for (const c of input.compatibility.filter(c => c.scope === 'COMPARTMENT'))
-    compat.set(`${c.fromProduct}|${c.toProduct}`, { allowed: c.allowed === 1, hours: c.changeoverHours, cost: c.changeoverCost });
+    compat.set(`${c.fromProduct}|${c.toProduct}`, { allowed: c.allowed, hours: c.changeoverHours, cost: c.changeoverCost });
   const transition = (from: string | null, to: string) => {
     if (!from || from === to) return { allowed: true, hours: 0, cost: 0 };
     return compat.get(`${from}|${to}`) ?? { allowed: true, hours: 0, cost: 0 };

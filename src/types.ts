@@ -18,7 +18,7 @@ export interface Tank {
 export interface NodeFlow { id: string; stream: string; locationId: string; productId: string; dailyIn: number; dailyOut: number; }
 export interface PlanLine { id: string; stream: string; periodId?: string | null; kind: string; productId: string; locationId: string; qty: number; windowStart: string; windowEnd: string; priority: number; }
 export interface Berth { id: string; stream: string; locationId: string; name: string; nsim: number; rateMtPerHr: number; berthingHours: number; maxDraft: number; }
-export interface ProductCompat { id: string; stream: string; scope: string; fromProduct: string; toProduct: string; allowed: number; changeoverHours: number; changeoverCost: number; }
+export interface ProductCompat { id: string; stream: string; scope: string; fromProduct: string; toProduct: string; allowed: boolean; changeoverHours: number; changeoverCost: number; }
 
 export interface Op { op: 'LOAD' | 'DISCHARGE'; productId: string; qty: number; compartmentId: string; }
 export interface Stop { seq: number; locationId: string; arriveDay: number; departDay: number; kind: string; ops: Op[]; }
@@ -57,7 +57,7 @@ export interface Kpis {
 export interface Unserved { locationId: string; productId: string; day: number; shortfallMt: number; reason: string; }
 export interface VersionSummary {
   id: string; version: number; status: string; trigger: string; objectiveCost: number;
-  achievable: number; createdAt: string; periodId?: string | null; isBaseline?: number; kpi?: Kpis | null;
+  achievable: boolean; createdAt: string; periodId?: string | null; isBaseline?: boolean; kpi?: Kpis | null;
 }
 
 // --- Periods, actuals, performance -----------------------------------------
