@@ -30,6 +30,12 @@ import { getDb } from './index';
 
 export const LEDGER_SCHEMA_VERSION = 1;
 
+/**
+ * Anything that can run a query — the shared handle or a transaction. Functions
+ * here take one explicitly so a caller already inside a transaction stays inside it.
+ */
+type Executor = { execute: (q: any) => Promise<any> };
+
 /** Fields that define an actuals row. Anything not listed here is presentation. */
 function actualMaterial(r: Record<string, any>): string {
   return JSON.stringify([
@@ -74,8 +80,11 @@ const rowsOf = (res: any): any[] => Array.isArray(res) ? res : res?.rows ?? [];
  * order — it follows the prev_hash links — but a deterministic order at seal time
  * makes the result reproducible.
  */
-export async function sealPeriod(stream: string, periodId: string): Promise<{ actuals: number; versions: number }> {
-  const db = await getDb();
+export async function sealPeriod(stream: string, periodId: string, exec?: Executor): Promise<{ actuals: number; versions: number }> {
+  // Callers inside a transaction MUST pass their transaction handle. Resolving a
+  // fresh handle here would issue queries outside the caller's transaction, and on
+  // a single-connection engine like PGlite that deadlocks against it.
+  const db = exec ?? await getDb();
   const counts = { actuals: 0, versions: 0 };
   for (const kind of ['actuals', 'schedule_versions'] as Kind[]) {
     const res = await db.execute(sql`

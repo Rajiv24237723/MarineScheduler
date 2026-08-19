@@ -7,7 +7,11 @@ import { Tip } from './ui/tooltip';
 import {
   ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip, ResponsiveContainer, Legend,
 } from 'recharts';
-import { Flag, Upload, Wand2, Trash2, Plus, Lock, Anchor, TrendingUp, TrendingDown, Minus } from 'lucide-react';
+import { Flag, Upload, Wand2, Trash2, Plus, Lock, Unlock, Anchor, TrendingUp, TrendingDown, Minus } from 'lucide-react';
+
+/** Months shipped with the demo as illustrative history rather than observed results. */
+const SEEDED_CODES = new Set(['2026-04', '2026-05', '2026-06']);
+const isSeeded = (p?: { code?: string } | null) => !!p?.code && SEEDED_CODES.has(p.code);
 
 const M = (n: number | null | undefined) => n == null ? '—' : `₹${(n / 1e6).toFixed(1)}M`;
 const signedM = (n: number | null | undefined) => n == null ? '—' : `${n >= 0 ? '+' : '−'}₹${Math.abs(n / 1e6).toFixed(1)}M`;
@@ -54,6 +58,7 @@ export default function PerformanceView({ data, stream, refresh }: { data: Dashb
   const [busy, setBusy] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [baseOpen, setBaseOpen] = useState(false);
+  const [closeOpen, setCloseOpen] = useState(false);
   const [form, setForm] = useState({ ...EMPTY_ROW });
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -109,7 +114,17 @@ export default function PerformanceView({ data, stream, refresh }: { data: Dashb
 
   const closePeriod = () => run(
     () => fetch(`/api/periods/${periodId}/close?stream=${stream}`, { method: 'POST' }).then(r => r.json()),
-    'Period closed.');
+    'Month closed and its record sealed.').then(() => setCloseOpen(false));
+
+  /**
+   * Closing a month freezes it at the database level, so without a way back an
+   * evaluator who closes the live month cannot plan at all — every write returns
+   * 409. Reopening makes this month the live one and closes the others, which is
+   * the same operation the roll-forward uses.
+   */
+  const reopenPeriod = () => run(
+    () => fetch(`/api/periods/${periodId}/open?stream=${stream}`, { method: 'POST' }).then(r => r.json()),
+    'Month reopened — it is now the live planning month.');
 
   const addActual = () => {
     const num = (v: string) => v === '' ? 0 : Number(v);
@@ -172,7 +187,7 @@ export default function PerformanceView({ data, stream, refresh }: { data: Dashb
         <div className="flex items-center gap-3">
           <h3 className="text-lg font-semibold text-foreground">Cost performance</h3>
           <select value={periodId} onChange={e => setPeriodId(e.target.value)} className="bg-background/60 text-xs rounded-md px-2.5 py-1.5 border border-border/80">
-            {periods.map(p => <option key={p.id} value={p.id}>{p.label}{p.status === 'Open' ? ' · live' : ''}</option>)}
+            {periods.map(p => <option key={p.id} value={p.id}>{p.label}{p.status === 'Open' ? ' · live' : ''}{isSeeded(p) ? ' · illustrative' : ''}</option>)}
           </select>
           {period && (
             <span className={`px-2 py-0.5 rounded-md text-[10px] border ${period.status === 'Open' ? 'bg-cyan-500/10 text-cyan-300 border-cyan-500/25' : 'bg-muted text-muted-foreground border-border/60'}`}>
@@ -180,13 +195,20 @@ export default function PerformanceView({ data, stream, refresh }: { data: Dashb
             </span>
           )}
           {period && <span className="text-[11px] text-muted-foreground">{period.startDate} → {period.endDate} · {period.versionCount} version(s){period.baselineVersion ? ` · baseline v${period.baselineVersion}` : ' · no baseline'}</span>}
+          {isSeeded(period) && (
+            <Tip content="Apr–Jun 2026 are illustrative history shipped with the demo, not observed results. Magnitudes are anchored to a solved July plan so the trend is on one scale. See docs/DATA_PROVENANCE.md." side="bottom">
+              <span className="px-2 py-0.5 rounded-md text-[10px] border bg-warn/10 text-warn border-warn/25 cursor-help">illustrative</span>
+            </Tip>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <button disabled={busy} onClick={() => setBaseOpen(true)} className="px-3 py-1.5 text-xs bg-muted hover:bg-accent border border-border/80 rounded-md flex items-center gap-1.5 disabled:opacity-50"><Flag className="w-3.5 h-3.5 text-cyan-400" /> Set baseline</button>
           <button disabled={busy} onClick={simulate} className="px-3 py-1.5 text-xs bg-muted hover:bg-accent border border-border/80 rounded-md flex items-center gap-1.5 disabled:opacity-50"><Wand2 className="w-3.5 h-3.5 text-cyan-400" /> Simulate execution</button>
           <button disabled={busy} onClick={() => fileRef.current?.click()} className="px-3 py-1.5 text-xs bg-muted hover:bg-accent border border-border/80 rounded-md flex items-center gap-1.5 disabled:opacity-50"><Upload className="w-3.5 h-3.5 text-cyan-400" /> Import actuals</button>
           <input ref={fileRef} type="file" accept=".csv,text/csv" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) onFile(f); e.target.value = ''; }} />
-          {period?.status === 'Open' && <button disabled={busy} onClick={closePeriod} className="px-3 py-1.5 text-xs bg-muted hover:bg-accent border border-border/80 rounded-md flex items-center gap-1.5 disabled:opacity-50"><Lock className="w-3.5 h-3.5" /> Close month</button>}
+          {period?.status === 'Open'
+            ? <button disabled={busy} onClick={() => setCloseOpen(true)} className="px-3 py-1.5 text-xs bg-muted hover:bg-accent border border-border/80 rounded-md flex items-center gap-1.5 disabled:opacity-50"><Lock className="w-3.5 h-3.5" /> Close month</button>
+            : period && <button disabled={busy} onClick={reopenPeriod} className="px-3 py-1.5 text-xs bg-muted hover:bg-accent border border-border/80 rounded-md flex items-center gap-1.5 disabled:opacity-50"><Unlock className="w-3.5 h-3.5 text-cyan-400" /> Reopen for planning</button>}
         </div>
       </div>
 
@@ -318,7 +340,11 @@ export default function PerformanceView({ data, stream, refresh }: { data: Dashb
             const Icon = v == null ? Minus : v > 0 ? TrendingUp : TrendingDown;
             return (
               <button key={t.periodId} onClick={() => setPeriodId(t.periodId)} className={`w-full grid grid-cols-6 gap-2 px-4 py-2 text-xs text-left hover:bg-muted/20 ${t.periodId === periodId ? 'bg-cyan-500/5' : ''}`}>
-                <span className="text-foreground/90 flex items-center gap-1.5">{t.label}{t.status === 'Open' && <span className="text-[9px] text-cyan-300">live</span>}</span>
+                <span className="text-foreground/90 flex items-center gap-1.5">
+                  {t.label}
+                  {t.status === 'Open' && <span className="text-[9px] text-cyan-300">live</span>}
+                  {SEEDED_CODES.has(t.code) && <span className="text-[9px] text-warn" title="Illustrative history shipped with the demo, not observed results">illustrative</span>}
+                </span>
                 <span className="text-right font-mono text-muted-foreground">{M(t.baselineCost)}</span>
                 <span className="text-right font-mono text-foreground/80">{M(t.planCost)}</span>
                 <span className="text-right font-mono text-foreground">{M(t.actualCost)}</span>
@@ -390,6 +416,26 @@ export default function PerformanceView({ data, stream, refresh }: { data: Dashb
           </CardContent>
         </Card>
       </div>
+
+      {/* Close month — states plainly what becomes irreversible and what does not */}
+      <Modal open={closeOpen} onClose={() => setCloseOpen(false)} title={`Close ${period?.label ?? 'this month'}?`} subtitle="Settling a month seals its record." width="max-w-md">
+        <div className="space-y-3 text-xs text-foreground/80">
+          <p>Closing does two things:</p>
+          <ul className="space-y-1.5 pl-4 list-disc text-muted-foreground">
+            <li>Writes a hash chain over this month's plan versions and actuals, so the record becomes verifiable.</li>
+            <li>Makes those rows <span className="text-foreground/90">immutable at the database level</span> — the guard rejects any later edit or deletion.</li>
+          </ul>
+          <p className="text-muted-foreground">
+            This is the live planning month, so closing it stops further planning against it. You can
+            reopen it afterwards — the seal stays valid — but any work you do while it is closed will be
+            rejected rather than silently dropped.
+          </p>
+        </div>
+        <div className="flex gap-2 mt-4">
+          <button disabled={busy} onClick={closePeriod} className="px-3 py-1.5 bg-primary hover:bg-primary/90 text-primary-foreground rounded-md text-xs disabled:opacity-50">Close and seal</button>
+          <button onClick={() => setCloseOpen(false)} className="px-3 py-1.5 bg-muted hover:bg-accent border border-border/80 rounded-md text-xs">Cancel</button>
+        </div>
+      </Modal>
 
       {/* Set baseline */}
       <Modal open={baseOpen} onClose={() => setBaseOpen(false)} title={`Baseline for ${period?.label ?? ''}`} subtitle="The frozen plan this month's cost is measured against.">

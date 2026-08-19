@@ -13,24 +13,53 @@ import * as schema from './schema';
  * against and what is deployed.
  *
  * PGlite is a single-connection embedded engine — right for development, demo and
- * CI, not for a shared production instance. That is the point of the split.
+ * CI, not for a shared production instance. Each process gets its own file, so two
+ * container instances would diverge; that is precisely why a deployed instance
+ * points at a real Postgres.
+ *
+ * Two URLs, because managed Postgres wants different endpoints for different jobs:
+ *
+ *   DATABASE_URL            pooled endpoint — app queries. Neon's pooler handles
+ *                           connection churn and supports protocol-level prepared
+ *                           statements (PgBouncer 1.22+).
+ *   MIGRATION_DATABASE_URL  direct endpoint — migrations. Neon documents pooled
+ *                           connections as error-prone for ORM migrations.
+ *
+ * Timeouts matter on a serverless plan. Neon's compute autosuspends after five
+ * minutes and cannot be told not to, so `idle_timeout` has to be short enough that
+ * lingering pool connections do not hold it awake and burn the monthly compute
+ * budget. `connect_timeout` has to be long enough to survive a resume.
  */
 
 const url = process.env.DATABASE_URL?.trim();
+const migrationUrl = process.env.MIGRATION_DATABASE_URL?.trim() || url;
 
 export const driver: 'pglite' | 'postgres' = url ? 'postgres' : 'pglite';
 export const dataDir = process.env.PGLITE_DIR || './.pgdata';
 
+function pgOptions() {
+  return {
+    max: Number(process.env.DATABASE_POOL_MAX ?? 5),
+    // Release connections promptly so a suspend-capable compute can actually suspend.
+    idle_timeout: Number(process.env.DATABASE_IDLE_TIMEOUT_SEC ?? 20),
+    // A cold compute has to wake before it can answer; the default is too impatient.
+    connect_timeout: Number(process.env.DATABASE_CONNECT_TIMEOUT_SEC ?? 15),
+    // Off only if a pooler in transaction mode rejects prepared statements.
+    prepare: process.env.DATABASE_PREPARE !== 'false',
+  };
+}
+
+async function connectPostgres(connectionString: string, opts: Record<string, unknown> = {}) {
+  const [{ drizzle }, postgresMod] = await Promise.all([
+    import('drizzle-orm/postgres-js'),
+    import('postgres'),
+  ]);
+  const sql = postgresMod.default(connectionString, { ...pgOptions(), ...opts });
+  return { db: drizzle(sql, { schema }), close: () => sql.end({ timeout: 5 }) };
+}
+
 async function connect() {
-  if (url) {
-    const [{ drizzle }, postgresMod] = await Promise.all([
-      import('drizzle-orm/postgres-js'),
-      import('postgres'),
-    ]);
-    // Modest pool: this process runs one solve at a time and long solves are CPU-bound.
-    const sql = postgresMod.default(url, { max: Number(process.env.DATABASE_POOL_MAX ?? 5) });
-    return drizzle(sql, { schema });
-  }
+  if (url) return (await connectPostgres(url)).db;
   const [{ drizzle }, { PGlite }] = await Promise.all([
     import('drizzle-orm/pglite'),
     import('@electric-sql/pglite'),
@@ -38,6 +67,18 @@ async function connect() {
   const client = new PGlite(dataDir);
   await client.waitReady;
   return drizzle(client, { schema });
+}
+
+/**
+ * A handle for schema migrations. On managed Postgres this is a short-lived
+ * connection to the DIRECT endpoint with a pool of one, closed as soon as the
+ * migration finishes. On PGlite there is only one database, so the caller reuses
+ * the shared handle and `close` is a no-op.
+ */
+export async function getMigrationDb(): Promise<{ db: Awaited<ReturnType<typeof connect>>; close: () => Promise<void> }> {
+  if (!migrationUrl) return { db: await getDb(), close: async () => {} };
+  const { db, close } = await connectPostgres(migrationUrl, { max: 1, prepare: false });
+  return { db: db as Awaited<ReturnType<typeof connect>>, close: async () => { await close(); } };
 }
 
 // A single shared handle. Awaited once at startup; every caller reuses it.

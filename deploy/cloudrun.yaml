@@ -1,0 +1,87 @@
+# Cloud Run service definition for the evaluation demo.
+#
+#   gcloud run services replace deploy/cloudrun.yaml --region=$REGION
+#
+# Committed so the deployment is reviewable rather than a sequence of console
+# clicks nobody can audit. Substitute PROJECT_ID / REGION / IMAGE before applying,
+# or apply with `gcloud run deploy` and the flags in deploy/README.md.
+#
+# The settings here are deliberate, not defaults:
+#
+#   autoscaling minScale: 0   Scale to zero. Costs nothing when idle, and — with
+#                             Neon — lets the database compute autosuspend so the
+#                             monthly CU-hour budget is not burned by an idle pool.
+#                             Do NOT raise this to 1 on a Neon free plan.
+#   maxScale: 4               Room for concurrent evaluators. Safe because state
+#                             lives in Postgres, not in the instance.
+#   containerConcurrency: 4   Solves are CPU-bound; piling many onto one instance
+#                             makes every evaluator slow.
+#   cpu: 2                    ALNS multi-start is CPU-bound. 1 vCPU is noticeably
+#                             slower on the same work.
+#   timeoutSeconds: 900       Well inside Cloud Run's 3600s ceiling. The optimise
+#                             endpoint streams progress, so the connection stays
+#                             active rather than looking hung.
+
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: marine-scheduler
+  labels:
+    cloud.googleapis.com/location: REGION
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/minScale: '0'
+        autoscaling.knative.dev/maxScale: '4'
+        run.googleapis.com/cpu-throttling: 'true'
+        run.googleapis.com/startup-cpu-boost: 'true'
+    spec:
+      containerConcurrency: 4
+      timeoutSeconds: 900
+      containers:
+        - image: IMAGE
+          ports:
+            - name: http1
+              containerPort: 8080
+          resources:
+            limits:
+              cpu: '2'
+              memory: 2Gi
+          env:
+            - name: NODE_ENV
+              value: production
+            # Pooled endpoint — app queries.
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: marine-database-url
+                  key: latest
+            # Direct endpoint — migrations only. Neon documents pooled connections
+            # as error-prone for ORM migrations.
+            - name: MIGRATION_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: marine-migration-database-url
+                  key: latest
+            # Short, so pooled connections release and the compute can suspend.
+            - name: DATABASE_IDLE_TIMEOUT_SEC
+              value: '20'
+            # Long enough for a suspended compute to wake before the first query fails.
+            - name: DATABASE_CONNECT_TIMEOUT_SEC
+              value: '15'
+            - name: DATABASE_POOL_MAX
+              value: '3'
+            - name: SOLVE_TIME_LIMIT_SEC
+              value: '120'
+          startupProbe:
+            httpGet:
+              path: /api/health
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 12
+          livenessProbe:
+            httpGet:
+              path: /api/health
+            periodSeconds: 30
+            failureThreshold: 3

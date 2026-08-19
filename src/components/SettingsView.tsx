@@ -9,7 +9,8 @@ export default function SettingsView({ data, stream, attempts, setAttempts, thre
 }) {
   const [reseeding, setReseeding] = useState(false);
   const [confirm, setConfirm] = useState(false);
-  const doReseed = async () => { setReseeding(true); try { await onReseed(); } catch (e) { console.error(e); } setReseeding(false); setConfirm(false); };
+  const [typed, setTyped] = useState('');
+  const doReseed = async () => { setReseeding(true); try { await onReseed(); } catch (e) { console.error(e); } setReseeding(false); setConfirm(false); setTyped(''); };
   const active = data.versions?.find(v => v.status === 'Active');
 
   const stat = (l: string, v: string | number) => <div className="bg-background/50 p-3 rounded-md border border-border/70"><div className="text-[11px] text-muted-foreground">{l}</div><div className="text-lg font-semibold text-foreground mt-0.5">{v}</div></div>;
@@ -68,14 +69,43 @@ export default function SettingsView({ data, stream, attempts, setAttempts, thre
       <Card className="bg-card/50 border-warn/25 rounded-md">
         <CardHeader className="py-2.5 px-4 border-b border-border/60"><CardTitle className="text-xs font-semibold text-warn flex items-center gap-2"><RotateCcw className="w-3.5 h-3.5" /> Data administration</CardTitle></CardHeader>
         <CardContent className="p-4">
-          <p className="text-xs text-muted-foreground mb-3">Reset all master data, plans and versions across every stream back to the seeded demo network. This cannot be undone.</p>
+          <p className="text-xs text-muted-foreground mb-3">
+            Reset all master data, plans and versions back to the seeded demo network.
+          </p>
+          {/*
+            The reset is server-wide, not per-session. On a shared instance it discards
+            work belonging to anyone else using it at the same time, which is worth
+            saying out loud rather than discovering.
+          */}
+          <div className="rounded-md border border-bad/25 bg-bad/5 p-3 mb-3 text-[11px] space-y-1.5">
+            <div className="text-bad font-medium">This affects everyone using this instance</div>
+            <ul className="text-muted-foreground space-y-1 pl-4 list-disc">
+              <li>Every stream is wiped — CRUDE, LNG and POL, not just the one you are viewing.</li>
+              <li>All generated plans, drafts, saved scenarios and recorded actuals are deleted.</li>
+              <li>If someone else is mid-session, their work goes too. There is no per-user data.</li>
+              <li>Sealed months are recreated from seed, so their hash chains change.</li>
+            </ul>
+          </div>
           {!confirm ? (
             <button onClick={() => setConfirm(true)} className="px-3 py-1.5 bg-muted hover:bg-accent border border-border/80 rounded-md text-xs">Reset demo data…</button>
           ) : (
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-warn">Reset everything to defaults?</span>
-              <button onClick={doReseed} disabled={reseeding} className="px-3 py-1.5 bg-bad hover:bg-bad/90 text-background rounded-md text-xs disabled:opacity-50">{reseeding ? 'Resetting…' : 'Yes, reset'}</button>
-              <button onClick={() => setConfirm(false)} className="px-3 py-1.5 bg-muted border border-border/80 rounded-md text-xs">Cancel</button>
+            <div className="space-y-2">
+              <label className="block text-xs text-warn">
+                Type <span className="font-mono text-foreground/90">RESET</span> to confirm you want to wipe every stream for every user:
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  autoFocus value={typed} onChange={e => setTyped(e.target.value)}
+                  placeholder="RESET"
+                  className="w-28 bg-background/50 rounded-md px-2 py-1.5 border border-border/80 text-xs font-mono"
+                />
+                <button
+                  onClick={doReseed}
+                  disabled={reseeding || typed.trim().toUpperCase() !== 'RESET'}
+                  className="px-3 py-1.5 bg-bad hover:bg-bad/90 text-background rounded-md text-xs disabled:opacity-40"
+                >{reseeding ? 'Resetting…' : 'Reset everything'}</button>
+                <button onClick={() => { setConfirm(false); setTyped(''); }} className="px-3 py-1.5 bg-muted border border-border/80 rounded-md text-xs">Cancel</button>
+              </div>
             </div>
           )}
         </CardContent>

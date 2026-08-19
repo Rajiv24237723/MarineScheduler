@@ -171,7 +171,7 @@ app.post('/api/optimize', async (req, res) => {
     const result = await solve(input);
     const versionId = await persistVersion(stream, result, 'reoptimize', (await activeVersion(stream))?.id ?? null);
     res.json({ ...result, versionId });
-  } catch (e) { console.error(e); res.status(500).json({ error: 'optimize failed', message: (e as Error).message }); }
+  } catch (e) { sendDbError(res, e, 'optimize failed'); }
 });
 
 // Streaming optimize: emits the solver's live convergence (NDJSON, one event per line) as
@@ -323,7 +323,7 @@ app.post('/api/scenario/apply', async (req, res) => {
     const { options, warnings, summary } = await resolveOptions(stream, req.body);
     const out = await simulateRecovery(stream, name, options, thresholds);
     res.json({ ...out, warnings, summary });
-  } catch (e) { console.error(e); res.status(500).json({ error: 'scenario apply failed', message: (e as Error).message }); }
+  } catch (e) { sendDbError(res, e, 'scenario apply failed'); }
 });
 
 // Three recovery candidates from one event — minimal-change, service-protection, lowest-cost —
@@ -346,7 +346,7 @@ app.post('/api/scenario/candidates', async (req, res) => {
       candidates.push({ mode, label, versionId: r.versionId, kpis: r.kpis, unserved: r.unserved, shortfall: r.shortfall, diff: r.diff, changeSet: r.changeSet, decision: r.decision });
     }
     res.json({ candidates, holds: chk.ok, breaches: chk.breaches, decision, warnings, summary });
-  } catch (e) { console.error(e); res.status(500).json({ error: 'scenario candidates failed', message: (e as Error).message }); }
+  } catch (e) { sendDbError(res, e, 'scenario candidates failed'); }
 });
 
 // Publish a version (draft or superseded) as the operating plan.
@@ -555,12 +555,20 @@ app.post('/api/periods/:id/close', async (req, res) => {
 
 /** Make this the live planning month; every other period for the stream is closed. */
 app.post('/api/periods/:id/open', async (req, res) => {
-  const r = repo(streamOf(req));
-  const p = await r.periodById(req.params.id);
-  if (!p) return res.status(404).json({ error: 'not found' });
-  await r.closeAllPeriods();
-  await r.updatePeriod(p.id, { status: 'Open' });
-  res.json({ ok: true });
+  try {
+    const r = repo(streamOf(req));
+    const p = await r.periodById(req.params.id);
+    if (!p) return res.status(404).json({ error: 'not found' });
+    // Any month this displaces gets sealed on the way out, so "Closed" always
+    // implies "sealed". Seal first — once Closed, the guard rejects the writes the
+    // chain needs. Re-closing a reopened month recomputes its chain from scratch,
+    // so digests left stale by edits during the reopen self-heal.
+    const displaced = (await r.periods()).filter(x => x.id !== p.id && x.status === 'Open');
+    for (const x of displaced) await sealPeriod(x.stream, x.id);
+    await r.closeAllPeriods();
+    await r.updatePeriod(p.id, { status: 'Open' });
+    res.json({ ok: true, opened: p.label, sealed: displaced.map(x => x.label) });
+  } catch (e) { sendDbError(res, e, 'open period failed'); }
 });
 
 app.delete('/api/periods/:id', async (req, res) => {
@@ -982,6 +990,22 @@ app.get('/api/ledger/verify', async (req, res) => {
   } catch (e) { console.error(e); res.status(500).json({ error: 'ledger verify failed', message: (e as Error).message }); }
 });
 
+/**
+ * Liveness/readiness. Deliberately touches the database rather than just returning
+ * 200 from Node: on a serverless Postgres plan a health check that never queries
+ * tells you nothing about whether the app can actually serve a request, and on a
+ * provider that suspends idle projects it would not count as activity either.
+ */
+app.get('/api/health', async (_req, res) => {
+  const t0 = Date.now();
+  try {
+    await db.execute(sql`select 1`);
+    res.json({ ok: true, db: driver, latencyMs: Date.now() - t0 });
+  } catch (e) {
+    res.status(503).json({ ok: false, db: driver, latencyMs: Date.now() - t0, message: (e as Error).message });
+  }
+});
+
 // Free Open-Meteo marine weather (no key).
 app.get('/api/weather', async (req, res) => {
   try {
@@ -990,6 +1014,33 @@ app.get('/api/weather', async (req, res) => {
     const d = await r.json(); res.json(d.current_weather);
   } catch { res.status(500).json({ error: 'weather fetch failed' }); }
 });
+
+/**
+ * Seed exactly once, even if several container instances cold-boot together.
+ *
+ * Without a lock, two instances both see an empty database and both seed, which
+ * duplicates every row — the kind of fault that only appears under the concurrency
+ * a shared demo actually gets. The lock is transaction-scoped rather than
+ * session-scoped on purpose: a connection pooler can hand out a different backend
+ * per transaction, which makes session-level advisory locks unreliable.
+ */
+const SEED_LOCK_KEY = 4726_1802;   // arbitrary, stable
+async function seedOnce(): Promise<'seeded' | 'already-populated'> {
+  // Held on an object so the assignment inside the transaction callback is visible
+  // to the type checker's control-flow analysis.
+  const state = { seeded: false };
+  await db.transaction(async (tx: any) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(${SEED_LOCK_KEY})`);
+    const res: any = await tx.execute(sql`select count(*)::int as n from locations`);
+    const n = Number((Array.isArray(res) ? res : res?.rows ?? [])[0]?.n ?? 0);
+    if (n > 0) return;
+    console.log('Seeding July 2026 start-of-month plan...');
+    await seed(tx);
+    state.seeded = true;
+  });
+  console.log(state.seeded ? 'Seed complete.' : 'Database already populated; seed skipped.');
+  return state.seeded ? 'seeded' : 'already-populated';
+}
 
 // ---------------------------------------------------------------------------
 async function startServer() {
@@ -1000,12 +1051,7 @@ async function startServer() {
     console.log(`Database ready on ${m.driver}; migrations applied.`);
     // Same DDL in PGlite and in production Postgres, which is why one dialect matters.
     await installLedgerGuards();
-    const locCount = await db.select({ count: sql`count(*)` }).from(schema.locations);
-    if (Number((locCount[0] as any).count) === 0) {
-      console.log('Seeding July 2026 start-of-month plan...');
-      await seed(db);
-      console.log('Seed complete.');
-    }
+    await seedOnce();
   } catch (e) { console.error('Startup (migrate/seed) failed:', e); process.exitCode = 1; }
 
   if (process.env.NODE_ENV !== 'production') {

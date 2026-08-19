@@ -422,7 +422,8 @@ export async function seed(db: any) {
   // the immutability guard, which is the guard working correctly.
   for (const st of STREAMS) for (const m of MONTHS) {
     const pid = `pp_${st.toLowerCase()}_${m.code}`;
-    await sealPeriod(st, pid);
+    // Pass the caller's handle: the seed may be running inside a transaction.
+    await sealPeriod(st, pid, db);
     await db.update(schema.planPeriods).set({ status: 'Closed' }).where(eq(schema.planPeriods.id, pid));
   }
 }

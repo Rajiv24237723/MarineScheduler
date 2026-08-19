@@ -120,9 +120,27 @@ export class StreamRepo {
   updateVersion(id: string, patch: Partial<typeof schema.scheduleVersions.$inferInsert>) {
     return db.update(schema.scheduleVersions).set(patch).where(and(eq(schema.scheduleVersions.id, id), this.ofStream(schema.scheduleVersions)));
   }
-  supersedeActive() {
-    return db.update(schema.scheduleVersions).set({ status: 'Superseded' })
+  /**
+   * Mark the stream's Active plan as superseded, skipping any that belong to a
+   * closed month.
+   *
+   * A settled period's rows are immutable at the database level, so blindly
+   * updating every Active row throws as soon as one of them sits in a closed
+   * month — which happens the moment someone reopens an earlier period and then
+   * re-plans. A closed month's plan staying flagged Active is the correct outcome:
+   * it is the settled record, and nothing should rewrite it.
+   */
+  async supersedeActive(): Promise<number> {
+    const active = await db.select().from(schema.scheduleVersions)
       .where(and(this.ofStream(schema.scheduleVersions), eq(schema.scheduleVersions.status, 'Active')));
+    if (!active.length) return 0;
+    const periods = await this.periods();
+    const closed = new Set(periods.filter(p => p.status === 'Closed').map(p => p.id));
+    const mutable = active.filter(v => !v.periodId || !closed.has(v.periodId));
+    if (!mutable.length) return 0;
+    await db.update(schema.scheduleVersions).set({ status: 'Superseded' })
+      .where(inArray(schema.scheduleVersions.id, mutable.map(v => v.id)));
+    return mutable.length;
   }
   clearBaseline(periodId: string) {
     return db.update(schema.scheduleVersions).set({ isBaseline: false })

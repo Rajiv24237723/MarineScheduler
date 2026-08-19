@@ -1,4 +1,4 @@
-import { getDb, driver, dataDir } from './index';
+import { getMigrationDb, driver, dataDir } from './index';
 
 /**
  * Apply committed migrations at startup.
@@ -10,15 +10,24 @@ import { getDb, driver, dataDir } from './index';
  * has applied, so this is idempotent and safe to run on every boot.
  */
 export async function migrate(): Promise<{ driver: string; applied: boolean; note?: string }> {
-  const db = await getDb();
   const folder = './drizzle';
 
   if (driver === 'pglite') {
+    const { db } = await getMigrationDb();
     const { migrate: run } = await import('drizzle-orm/pglite/migrator');
     await run(db as any, { migrationsFolder: folder });
     return { driver: `pglite (${dataDir})`, applied: true };
   }
-  const { migrate: run } = await import('drizzle-orm/postgres-js/migrator');
-  await run(db as any, { migrationsFolder: folder });
-  return { driver: 'postgres', applied: true };
+  // Managed Postgres: migrate over the DIRECT endpoint, then drop the connection.
+  // Neon documents pooled connections as error-prone for ORM migrations, and a
+  // lingering connection would keep a suspend-capable compute awake.
+  const { db, close } = await getMigrationDb();
+  try {
+    const { migrate: run } = await import('drizzle-orm/postgres-js/migrator');
+    await run(db as any, { migrationsFolder: folder });
+  } finally {
+    await close();
+  }
+  const direct = !!process.env.MIGRATION_DATABASE_URL;
+  return { driver: 'postgres', applied: true, note: direct ? 'migrated over the direct endpoint' : 'migrated over DATABASE_URL (set MIGRATION_DATABASE_URL to the direct endpoint on a pooled provider)' };
 }
