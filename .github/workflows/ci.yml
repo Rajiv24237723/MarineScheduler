@@ -1,0 +1,88 @@
+name: CI
+
+# Runs on every push and pull request to main. Nothing here needs a database
+# service: development and CI both run Postgres in-process via PGlite, which is the
+# practical payoff of choosing an embedded engine that speaks the same dialect as
+# production rather than a different one.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  # A newer push supersedes an in-flight run on the same ref.
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Types
+        run: npm run lint
+
+      # Catches a broken client bundle or server bundle before it reaches a container.
+      - name: Build
+        run: npm run build
+
+      # Correctness invariants on the engine: every generated instance stays feasible,
+      # the lower bound never exceeds the heuristic's cost, and repeated runs on the
+      # same seed agree. Exits non-zero on any breach.
+      - name: Engine regression
+        run: npm run bench:test
+
+      # Proves the tamper-evidence rather than asserting it: seeds a clean baseline,
+      # disables the immutability trigger the way an attacker with DDL rights would,
+      # mutates one row and deletes another, and requires both to be detected. Restores
+      # from seed afterwards.
+      - name: Ledger integrity
+        run: npm run ledger:test
+
+      # A fresh database must migrate, seed and answer a real query — the same path a
+      # container takes on first boot. Catches migration drift and startup regressions
+      # that type-checking cannot see.
+      - name: Cold start
+        run: |
+          rm -rf .pgdata
+          NODE_ENV=production node dist/server.cjs > boot.log 2>&1 &
+          # Locally this is healthy in ~6s; the headroom is for a slow runner.
+          for i in $(seq 1 90); do
+            if curl -fsS --max-time 5 http://localhost:3000/api/health > health.json 2>/dev/null; then
+              echo "healthy after ${i}s"; break
+            fi
+            sleep 1
+          done
+          cat boot.log
+          test -s health.json || { echo "::error::server never became healthy"; exit 1; }
+          grep -q '"ok":true' health.json || { echo "::error::health check did not report ok"; cat health.json; exit 1; }
+          grep -q 'Seed complete' boot.log || { echo "::error::first boot did not seed"; exit 1; }
+          # Sealed months must verify on a fresh install, or the seeded history is broken.
+          curl -fsS --max-time 30 "http://localhost:3000/api/ledger/verify?stream=POL" > ledger.json
+          grep -q '"intact":true' ledger.json || { echo "::error::ledger did not verify on a fresh seed"; cat ledger.json; exit 1; }
+          echo "cold start, seed and ledger all verified"
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-logs
+          path: |
+            boot.log
+            health.json
+            ledger.json
+          if-no-files-found: ignore
+          retention-days: 7

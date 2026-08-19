@@ -13,3 +13,7 @@ marine.db-journal
 marine.db-wal
 marine.db-shm
 .pgdata/
+# Transient output from the CI cold-start check, if run locally
+boot.log
+health.json
+ledger.json
