@@ -70,6 +70,61 @@ async function connect() {
 }
 
 /**
+ * Wait until the database actually answers.
+ *
+ * A suspend-capable compute is not reachable the instant a container starts — Neon
+ * resumes on connect, and the first attempt can time out or be refused while it
+ * wakes. Without this, a cold start races the resume and the process either dies in
+ * migrations or serves errors to whoever triggered the wake. Retrying with backoff
+ * turns a race into a couple of seconds of patience.
+ *
+ * Deliberately bounded: if the database is genuinely misconfigured or unreachable,
+ * failing loudly after a few attempts beats retrying forever and looking hung.
+ */
+export async function waitForDb(
+  { attempts = 6, budgetMs = Number(process.env.DATABASE_READY_BUDGET_MS ?? 45_000) } = {},
+): Promise<{ attempts: number; ms: number }> {
+  const t0 = Date.now();
+  const { sql } = await import('drizzle-orm');
+  let lastErr: unknown;
+  for (let i = 1; i <= attempts; i++) {
+    try {
+      const handle = await getDb();
+      await handle.execute(sql`select 1`);
+      return { attempts: i, ms: Date.now() - t0 };
+    } catch (e) {
+      lastErr = e;
+      const spent = Date.now() - t0;
+      // An overall budget, not just an attempt count. Each attempt can sit on the
+      // driver's own connect timeout, so six of them against a genuinely unreachable
+      // host took ~2 minutes — long past the point a startup probe gives up, and slow
+      // to debug. A resume takes seconds, so anything beyond the budget is a real
+      // fault and should say so promptly.
+      if (i === attempts || spent >= budgetMs) break;
+      const wait = Math.min(250 * 2 ** (i - 1), Math.max(0, budgetMs - spent));
+      console.warn(`[db] not ready (attempt ${i}/${attempts}, ${spent}ms elapsed): ${describe(e)}. Retrying in ${wait}ms.`);
+      await new Promise(r => setTimeout(r, wait));
+    }
+  }
+  throw new Error(`Database did not become ready within ${Date.now() - t0}ms: ${describe(lastErr)}`);
+}
+
+/**
+ * Drizzle wraps driver errors as "Failed query: …\nparams: …", which both buries the
+ * real cause (ECONNREFUSED, ETIMEDOUT, password failure) and spans several lines —
+ * so a log aggregator splits one failure into several entries and a grep shows the
+ * useless half. Collapse to a single line and surface the cause.
+ */
+function describe(e: unknown): string {
+  const err = e as { message?: string; cause?: { message?: string; code?: string } };
+  const flat = (s: string) => s.replace(/\s+/g, ' ').trim();
+  const cause = err?.cause;
+  const head = flat(err?.message ?? String(e));
+  if (!cause?.message && !cause?.code) return head;
+  return `${head} [${[cause.code, cause.message && flat(cause.message)].filter(Boolean).join(': ')}]`;
+}
+
+/**
  * A handle for schema migrations. On managed Postgres this is a short-lived
  * connection to the DIRECT endpoint with a pool of one, closed as soon as the
  * migration finishes. On PGlite there is only one database, so the caller reuses

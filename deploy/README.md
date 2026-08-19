@@ -80,16 +80,96 @@ gcloud run deploy marine-scheduler \
 
 Subsequent boots skip the seed, which is what makes generated plan history persist.
 
+## Reducing cold starts (optional, still free)
+
+The first evaluator after an idle spell waits for two things: the container to boot,
+and the Neon compute to resume. They cost very different amounts to remove.
+
+**Never point a timer at `/api/health`.** It runs a real query, so a schedule or a
+liveness probe hitting it keeps the compute permanently awake:
+
+```
+24/7 awake at the 0.25 CU floor = 730 h × 0.25 = 182 CU-hours/month
+Neon free budget                                = 100 CU-hours
+```
+
+Past that, in Neon's words, "existing connections drop and new ones can't open"
+until the next billing period. There is no way to buy your way out mid-month except
+upgrading. This is why the liveness probe in `cloudrun.yaml` uses `/api/ping`.
+
+### Warm the container — cheap, leave it on
+
+`/api/ping` is liveness only and touches nothing. Warming with it removes the larger
+half of the latency and leaves the database asleep.
+
+```bash
+gcloud scheduler jobs create http marine-warm-container \
+  --project="$PROJECT_ID" --location="$REGION" \
+  --schedule="*/5 * * * *" \
+  --uri="$URL/api/ping" --http-method=GET
+```
+
+Cost against the always-free tier (2 M requests, 180,000 vCPU-s, 360,000 GiB-s):
+
+| | Used | Allowance | Share |
+|---|---|---|---|
+| Requests | 8,760/mo | 2,000,000 | 0.4% |
+| vCPU-seconds | 2 vCPU × 0.1 s × 8,760 = 1,752 | 180,000 | 1% |
+| GiB-seconds | 2 GiB × 0.1 s × 8,760 = 1,752 | 360,000 | 0.5% |
+
+With CPU throttling on — which `cloudrun.yaml` sets — you are billed only while a
+request is being served, so a warm-but-idle instance between pings costs nothing.
+
+### Warm the database too — only during evaluation hours
+
+This one spends CU-hours, so bound it to when evaluators are actually around. Neon's
+own figure is ~400 awake hours per month at the 0.25 CU floor.
+
+```bash
+# 09:00–18:00 Mon–Fri, every 4 minutes (inside Neon's 5-minute autosuspend window)
+gcloud scheduler jobs create http marine-warm-db \
+  --project="$PROJECT_ID" --location="$REGION" \
+  --schedule="*/4 9-17 * * 1-5" --time-zone="Asia/Kolkata" \
+  --uri="$URL/api/health" --http-method=GET
+```
+
+| Schedule | Awake hours | CU-hours | Verdict |
+|---|---|---|---|
+| 24/7 | 730 | 182 | locked out mid-month |
+| 09:00–18:00 weekdays | 189 | ~47 | comfortable |
+| 08:00–20:00 weekdays | 252 | ~63 | fine |
+
+The figures assume the compute stays near the floor. Neon scales to 2 CU under load,
+so busy evaluation days burn faster than the table implies — the headroom absorbs it,
+but 400 hours is not a guarantee. Delete this job when the evaluation ends.
+
+Cloud Scheduler allows **3 free jobs per billing account**; these two fit.
+
+### What this does not fix
+
+Cloud Run gives no guarantee about how long an idle instance survives, so warming
+reduces cold starts rather than eliminating them. And a ping keeps *one* instance
+warm — with `maxScale: 4`, two evaluators arriving together may still meet a cold
+start on a second instance. Removing that needs `min-instances`, which bills and
+would hold the database awake, so it is the one place where free and instant
+genuinely conflict.
+
+Startup is resilient regardless: `waitForDb()` retries with backoff (250 ms → 4 s)
+so a container that boots while the compute is still waking waits rather than dying
+in migrations or serving errors.
+
 ## Verifying
 
 ```bash
-curl -s "$URL/api/health"                      # touches the database, not just Node
+curl -s "$URL/api/ping"                        # liveness only — no database
+curl -s "$URL/api/health"                      # runs a real query; wakes a suspended compute
 curl -s "$URL/api/ledger/verify?stream=POL"    # sealed months verify
 curl -s "$URL/api/dashboard?stream=POL" | head -c 200
 ```
 
-`/api/health` runs a real `select 1` on purpose: a health check that never queries
-says nothing about whether the app can serve a request.
+The split is the point. `/api/health` runs a real `select 1`, because a health check
+that never queries says nothing about whether the app can serve a request — but that
+also makes it unsuitable for anything on a short timer. `/api/ping` exists for timers.
 
 ## Local development is unaffected
 

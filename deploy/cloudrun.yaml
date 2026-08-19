@@ -74,14 +74,22 @@ spec:
               value: '3'
             - name: SOLVE_TIME_LIMIT_SEC
               value: '120'
+          # Startup: /api/health queries the database, so the container is only
+          # declared ready once it can actually serve. Runs once per boot, so waking
+          # a suspended compute here is exactly what we want.
           startupProbe:
             httpGet:
               path: /api/health
             initialDelaySeconds: 5
             periodSeconds: 5
             failureThreshold: 12
+          # Liveness: /api/ping, which does NOT touch the database. Pointing this at
+          # /api/health would query every 30s — about 2,880 times a day — keeping a
+          # suspend-capable compute permanently awake. On Neon's free plan that is
+          # roughly 182 CU-hours a month against a 100-hour budget, and the database
+          # locks out until the next billing period. Do not "fix" this to /api/health.
           livenessProbe:
             httpGet:
-              path: /api/health
+              path: /api/ping
             periodSeconds: 30
             failureThreshold: 3

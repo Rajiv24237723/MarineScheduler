@@ -2,7 +2,7 @@ import express from 'express';
 import path from 'path';
 import { randomUUID } from 'crypto';
 import { createServer as createViteServer } from 'vite';
-import { db, getDb, driver } from './src/db/index';
+import { db, getDb, driver, waitForDb } from './src/db/index';
 import * as schema from './src/db/schema';
 import { eq, and, desc, sql } from 'drizzle-orm';
 import { migrate } from './src/db/migrate';
@@ -991,10 +991,25 @@ app.get('/api/ledger/verify', async (req, res) => {
 });
 
 /**
- * Liveness/readiness. Deliberately touches the database rather than just returning
- * 200 from Node: on a serverless Postgres plan a health check that never queries
- * tells you nothing about whether the app can actually serve a request, and on a
- * provider that suspends idle projects it would not count as activity either.
+ * Liveness only — deliberately does NOT touch the database.
+ *
+ * This is the endpoint to point a keep-warm schedule and a liveness probe at. On a
+ * serverless Postgres plan whose compute suspends when idle, anything that queries
+ * on a timer keeps that compute permanently awake: a 30-second probe is ~2,880
+ * queries a day, which on Neon's free plan burns roughly 182 CU-hours a month
+ * against a 100-hour budget and locks the database out until the next billing
+ * period. Warming the container is nearly free; warming the database is not.
+ *
+ * Use /api/health when you want to know whether the database is reachable.
+ */
+app.get('/api/ping', (_req, res) => {
+  res.json({ ok: true, uptimeSec: Math.round(process.uptime()), env: cfg.NODE_ENV });
+});
+
+/**
+ * Readiness — reports whether the database is actually reachable, so it runs a real
+ * query rather than returning 200 from Node. Right for a startup probe and for
+ * manual checks; wrong for anything on a short timer (see /api/ping).
  */
 app.get('/api/health', async (_req, res) => {
   const t0 = Date.now();
@@ -1045,14 +1060,24 @@ async function seedOnce(): Promise<'seeded' | 'already-populated'> {
 // ---------------------------------------------------------------------------
 async function startServer() {
   try {
-    await getDb();
+    // Wait for the database before touching it: a suspend-capable compute resumes
+    // on connect, and a cold start would otherwise race the resume.
+    const ready = await waitForDb();
+    if (ready.attempts > 1) console.log(`Database answered after ${ready.attempts} attempts (${ready.ms}ms).`);
     // Committed migrations, replayed in order — not a destructive schema diff.
     const m = await migrate();
-    console.log(`Database ready on ${m.driver}; migrations applied.`);
+    console.log(`Database ready on ${m.driver}; migrations applied.${m.note ? ` (${m.note})` : ''}`);
     // Same DDL in PGlite and in production Postgres, which is why one dialect matters.
     await installLedgerGuards();
     await seedOnce();
-  } catch (e) { console.error('Startup (migrate/seed) failed:', e); process.exitCode = 1; }
+  } catch (e) {
+    // Exit rather than listen. Previously this only set exitCode and carried on, so a
+    // container with an unreachable database still bound the port and answered every
+    // request with an error — the deploy looked healthy and failed silently. Exiting
+    // makes Cloud Run fail the revision and surface the reason.
+    console.error('Startup failed — refusing to serve:', (e as Error).message);
+    process.exit(1);
+  }
 
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({ server: { middlewareMode: true }, appType: 'spa' });
