@@ -179,10 +179,17 @@ needs Neon.
 
 ## Notes
 
-- **Storage.** Neon free gives 0.5 GB. Version rows carry the full solve result and
-  the inventory projection as JSONB, roughly a few hundred KB each — over a thousand
-  versions before it matters. Scenario runs create three draft candidates apiece, so
-  it grows faster than version numbers suggest; discard drafts you do not need.
+- **Storage.** Measured, not estimated. After the seed plus one solve plus one
+  scenario candidate run the whole database is **9.1 MB of the 500 MB** free tier.
+  JSONB TOAST-compresses well, so a version row averages ~7 KB (payload 2 KB,
+  projection 5 KB) rather than the hundreds of KB it looks like uncompressed. A
+  candidate run costs ~110 KB, which is roughly **4,700 runs** before the tier fills.
+  Storage is not a practical constraint for an evaluation.
+
+  The thing that does accumulate is clutter: each candidate run persists three
+  drafts and only one gets published, so the version list fills with `scenario:*`
+  entries. Replanning Workbench has a "Discard N drafts" button, and
+  `DELETE /api/versions/drafts?stream=` does it from the command line.
 - **Reset.** Settings → Data administration wipes every stream for everyone using
   the instance. It is the right escape hatch for evaluators trying combinations, but
   it is not per-session.

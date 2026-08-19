@@ -86,30 +86,39 @@ async function persistVersion(stream: string, result: SolveResult, trigger: stri
     if (!inPeriod.some(v => v.isBaseline)) await r.updateVersion(id, { isBaseline: true });
   }
 
-  // Normalized voyage tables (browsable/queryable). Logical voyage ids repeat
-  // across re-runs of a stream, so remap to per-version UUIDs on insert.
+  // Normalized voyage tables, for SQL-level inspection alongside the JSON payload.
+  // Built in memory and written in four batched statements rather than one round-trip
+  // per row — see StreamRepo.insertMany for why that matters off-box.
+  // Logical voyage ids repeat across re-runs of a stream, so remap to per-version UUIDs.
   const idMap = new Map<string, string>();
+  const voyageRows: any[] = [], stopRows: any[] = [], opRows: any[] = [];
   for (const v of result.voyages) {
     const vid = randomUUID(); idMap.set(v.id, vid);
-    await r.insertVoyage({
+    voyageRows.push({
       id: vid, stream, versionId: id, vesselId: v.vesselId, vesselName: v.vesselName,
       vesselClass: v.vesselClass, pool: v.pool, startDay: v.startDay, endDay: v.endDay,
       cost: v.cost, costBreakdown: v.costBreakdown as any,
     });
     for (const s of v.stops) {
       const stopId = randomUUID();
-      await r.insertStop({
+      stopRows.push({
         id: stopId, voyageId: vid, seq: s.seq, locationId: s.locationId,
         arriveDay: s.arriveDay, departDay: s.departDay, kind: s.kind,
       });
-      for (const op of s.ops) await r.insertOp({
+      for (const op of s.ops) opRows.push({
         id: randomUUID(), voyageId: vid, stopId, op: op.op, productId: op.productId, qty: op.qty, compartmentId: op.compartmentId,
       });
     }
   }
-  for (const rec of result.charterRecommendations) await r.insertCharterRec({
-    id: randomUUID(), stream, versionId: id, voyageId: rec.voyageId ? (idMap.get(rec.voyageId) ?? null) : null, vesselClass: rec.vesselClass, reason: rec.reason, estCost: rec.estCost,
-  });
+  const recRows = result.charterRecommendations.map(rec => ({
+    id: randomUUID(), stream, versionId: id,
+    voyageId: rec.voyageId ? (idMap.get(rec.voyageId) ?? null) : null,
+    vesselClass: rec.vesselClass, reason: rec.reason, estCost: rec.estCost,
+  }));
+  await r.insertVoyages(voyageRows);
+  await r.insertStops(stopRows);
+  await r.insertOps(opRows);
+  await r.insertCharterRecs(recRows);
   return id;
 }
 
@@ -366,6 +375,28 @@ async function makeActive(stream: string, id: string, res: any) {
 const streamOf = (req: any) => (req.query.stream as string) || 'POL';
 app.post('/api/versions/:id/publish', (req, res) => makeActive(streamOf(req), req.params.id, res));
 app.post('/api/versions/:id/rollback', (req, res) => makeActive(streamOf(req), req.params.id, res));
+
+/**
+ * Discard every draft for a stream.
+ *
+ * A scenario candidate run persists three drafts so they can be compared before one
+ * is published — the other two are then dead, and nothing collects them. Over an
+ * evaluation session the version list fills with `scenario:*` drafts that obscure
+ * the real plan history. This is housekeeping rather than a storage measure: a draft
+ * is only ~35 KB, so the 500 MB free tier would take roughly 4,700 candidate runs to
+ * fill. The clutter arrives long before the bytes matter.
+ */
+app.delete('/api/versions/drafts', async (req, res) => {
+  try {
+    const r = repo(streamOf(req));
+    const drafts = await r.drafts();
+    for (const d of drafts) {
+      await r.deleteVoyageTree(d.id);
+      await r.deleteVersion(d.id);
+    }
+    res.json({ ok: true, discarded: drafts.length, versions: drafts.map(d => d.version) });
+  } catch (e) { sendDbError(res, e, 'discard drafts failed'); }
+});
 
 // Discard a non-active version and its voyages.
 app.delete('/api/versions/:id', async (req, res) => {

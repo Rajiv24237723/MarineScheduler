@@ -5,7 +5,7 @@ import { Modal } from '@/components/ui/modal';
 import { toast } from './ui/toast';
 import { VoyageDetail } from './VoyageDetail';
 import ScenarioComposer from './ScenarioComposer';
-import { GitCompare, AlertTriangle, CheckCircle2, Ship, Anchor, Snowflake, Plus, Layers, Flag } from 'lucide-react';
+import { GitCompare, AlertTriangle, CheckCircle2, Ship, Anchor, Snowflake, Plus, Layers, Flag, Trash2 } from 'lucide-react';
 import { format, addDays } from 'date-fns';
 
 const START = () => horizonStartDate();
@@ -89,6 +89,16 @@ export default function ReplanningView({ data, stream, refresh, thresholds }: { 
   const discard = async (id: string) => { await fetch(`/api/versions/${id}?stream=${stream}`, { method: 'DELETE' }); if (draft?.versionId === id) setDraft(null); await refresh(); toast('Draft discarded.', 'info'); };
   const publishCandidate = async (chosen: any) => { await fetch(`/api/versions/${chosen.versionId}/publish?stream=${stream}`, { method: 'POST' }); for (const c of candidates.candidates) if (c.versionId !== chosen.versionId) await fetch(`/api/versions/${c.versionId}?stream=${stream}`, { method: 'DELETE' }); setCandidates(null); setCheck(null); await refresh(); toast(`Published “${chosen.label}” recovery as the operating plan.`, 'success'); };
   const discardCandidates = async () => { for (const c of candidates.candidates) await fetch(`/api/versions/${c.versionId}?stream=${stream}`, { method: 'DELETE' }); setCandidates(null); await refresh(); toast('Candidates discarded.', 'info'); };
+  // A candidate run leaves three drafts behind; only one gets published. Without a
+  // sweep the version list fills with scenario drafts and hides the real history.
+  const draftCount = versions.filter(v => v.status === 'Draft').length;
+  const discardAllDrafts = async () => {
+    const r = await fetch(`/api/versions/drafts?stream=${stream}`, { method: 'DELETE' });
+    const res = await r.json();
+    setDraft(null); setCandidates(null);
+    await refresh();
+    toast(res.error ? res.error : `Discarded ${res.discarded} draft${res.discarded === 1 ? '' : 's'}.`, res.error ? 'error' : 'info');
+  };
   const compare = async () => { if (!a || !b) return; const r = await fetch(`/api/versions/compare?a=${a}&b=${b}`); setCmp(await r.json()); };
   const openVersion = async (id: string, v: number) => { const r = await fetch(`/api/versions/${id}?stream=${stream}`); const row = await r.json(); setVersionVoyages({ v, voyages: row.payload?.voyages ?? [] }); };
 
@@ -258,8 +268,16 @@ export default function ReplanningView({ data, stream, refresh, thresholds }: { 
       {/* Version history */}
       <Card className="bg-card/50 border-border/80 rounded-md">
         <CardHeader className="py-3 px-4 border-b border-border/60 flex flex-row items-center justify-between">
-          <CardTitle className="text-sm font-semibold text-foreground/80">Plan versions ({versions.length})</CardTitle>
+          <CardTitle className="text-sm font-semibold text-foreground/80">
+            Plan versions ({versions.length})
+            {draftCount > 0 && <span className="ml-2 text-[11px] font-normal text-cyan-300">{draftCount} draft{draftCount === 1 ? '' : 's'}</span>}
+          </CardTitle>
           <div className="flex items-center gap-2">
+            {draftCount > 0 && (
+              <button onClick={discardAllDrafts} className="px-2.5 py-1 bg-muted hover:bg-accent border border-border/80 rounded-md text-[11px] flex items-center gap-1">
+                <Trash2 className="w-3 h-3" /> Discard {draftCount} draft{draftCount === 1 ? '' : 's'}
+              </button>
+            )}
             <select value={a} onChange={e => setA(e.target.value)} className="bg-background/50 text-[11px] rounded-md px-2 py-1 border border-border/80">{versions.map(v => <option key={v.id} value={v.id}>v{v.version}</option>)}</select>
             <span className="text-muted-foreground text-[11px]">vs</span>
             <select value={b} onChange={e => setB(e.target.value)} className="bg-background/50 text-[11px] rounded-md px-2 py-1 border border-border/80">{versions.map(v => <option key={v.id} value={v.id}>v{v.version}</option>)}</select>

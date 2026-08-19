@@ -155,10 +155,33 @@ export class StreamRepo {
     return db.select().from(schema.voyages)
       .where(and(eq(schema.voyages.versionId, versionId), this.ofStream(schema.voyages)));
   }
-  insertVoyage(row: typeof schema.voyages.$inferInsert) { return db.insert(schema.voyages).values(row); }
-  insertStop(row: typeof schema.voyageStops.$inferInsert) { return db.insert(schema.voyageStops).values(row); }
-  insertOp(row: typeof schema.voyageOps.$inferInsert) { return db.insert(schema.voyageOps).values(row); }
-  insertCharterRec(row: typeof schema.charterRecommendations.$inferInsert) { return db.insert(schema.charterRecommendations).values(row); }
+  /**
+   * Batched, because these used to be written one awaited row at a time, nested
+   * voyage → stop → op. A single POL solve is roughly 3 voyages, 14 stops and 74
+   * operations, so persisting one version cost about 91 sequential round-trips.
+   * In-process that is invisible; against a networked Postgres it is seconds of
+   * pure latency on every solve, and a scenario candidate run pays it three times.
+   *
+   * Chunked so a pathologically large solve cannot exceed Postgres' 65,535 bound
+   * parameters per statement.
+   */
+  private async insertMany<T>(table: any, rows: T[], chunk = 500): Promise<number> {
+    for (let i = 0; i < rows.length; i += chunk) {
+      await db.insert(table).values(rows.slice(i, i + chunk) as any);
+    }
+    return rows.length;
+  }
+
+  insertVoyages(rows: (typeof schema.voyages.$inferInsert)[]) { return this.insertMany(schema.voyages, rows); }
+  insertStops(rows: (typeof schema.voyageStops.$inferInsert)[]) { return this.insertMany(schema.voyageStops, rows); }
+  insertOps(rows: (typeof schema.voyageOps.$inferInsert)[]) { return this.insertMany(schema.voyageOps, rows); }
+  insertCharterRecs(rows: (typeof schema.charterRecommendations.$inferInsert)[]) { return this.insertMany(schema.charterRecommendations, rows); }
+
+  /** Drafts for this stream — transient by nature, and they pile up. */
+  async drafts(): Promise<Version[]> {
+    return db.select().from(schema.scheduleVersions)
+      .where(and(this.ofStream(schema.scheduleVersions), eq(schema.scheduleVersions.status, 'Draft')));
+  }
 
   /** Remove a version's voyage tree. Ops and stops are keyed by voyage, not stream. */
   async deleteVoyageTree(versionId: string): Promise<number> {
